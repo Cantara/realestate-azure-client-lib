@@ -11,12 +11,12 @@ public class AzureDeviceClient {
 
     private final DeviceClient deviceClient;
 
-    boolean connectionEstablished = false;
+    private boolean connectionEstablished = false;
     private boolean retryConnection;
 
     public AzureDeviceClient(String connectionString) {
         ClientOptions clientOptions = ClientOptions.builder().keepAliveInterval(30).build();
-        deviceClient = new DeviceClient(connectionString, IotHubClientProtocol.MQTT, clientOptions);
+        deviceClient = new DeviceClient(connectionString, IotHubClientProtocol.MQTT_WS, clientOptions);
     }
 
     /*
@@ -26,7 +26,7 @@ public class AzureDeviceClient {
         this.deviceClient = deviceClient;
     }
 
-    protected void openConnection() {
+    public void openConnection() {
         try {
             deviceClient.open(retryConnection);
             connectionEstablished = true;
@@ -34,6 +34,13 @@ public class AzureDeviceClient {
             //FIXME handle open connection errors.
             connectionEstablished = false;
             throw new RuntimeException(e);
+        }
+    }
+
+    public void closeConnection() {
+        if (deviceClient != null) {
+            deviceClient.close();
+            connectionEstablished = false;
         }
     }
 
