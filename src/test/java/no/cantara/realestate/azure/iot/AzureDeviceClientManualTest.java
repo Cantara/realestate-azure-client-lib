@@ -11,8 +11,9 @@ class AzureDeviceClientManualTest {
 
     public static void main(String[] args) throws InterruptedException {
         if (args.length < 1) {
-            log.info("You need to provide \"primary connection string\" from a Device registered in Azure IoTHub.\n" +
+            log.error("You need to provide \"primary connection string\" from a Device registered in Azure IoTHub.\n" +
                     "Enter this string as the first argument when running this class.");
+            System.exit(0);
         }
         String connectionString = args[0];
         log.debug("ConnectionString {}", connectionString);
@@ -22,7 +23,7 @@ class AzureDeviceClientManualTest {
         log.info("Establishing and verifying connection.");
         Thread.sleep(500);
         if (deviceClient.isConnectionEstablished()) {
-            log.info("Sleeping for 10 seconds before sleeping.");
+            log.info("Sleeping for 10 seconds.");
             Thread.sleep(10000);
             deviceClient.closeConnection();
             assertFalse(deviceClient.isConnectionEstablished());
