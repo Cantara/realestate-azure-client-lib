@@ -4,7 +4,7 @@ import java.util.Arrays;
 import java.util.List;
 
 public class RecMessage {
-    private final String format = "rec3.1";
+    private final String format = "rec3.3";
     private final String deviceId;
     private Observation[] observations;
 
