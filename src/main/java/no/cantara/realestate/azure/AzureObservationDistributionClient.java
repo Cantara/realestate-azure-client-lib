@@ -6,6 +6,7 @@ import com.microsoft.azure.sdk.iot.device.MessageSentCallback;
 import com.microsoft.azure.sdk.iot.device.MessageType;
 import com.microsoft.azure.sdk.iot.device.exceptions.IotHubClientException;
 import no.cantara.realestate.azure.iot.AzureDeviceClient;
+import no.cantara.realestate.azure.rec.RecObservationMessage;
 import no.cantara.realestate.distribution.ObservationDistributionClient;
 import no.cantara.realestate.json.RealEstateObjectMapper;
 import no.cantara.realestate.observations.ObservationMessage;
@@ -64,7 +65,9 @@ public class AzureObservationDistributionClient implements ObservationDistributi
             return;
         }
         try {
-            String observationJson = objectMapper.getObjectMapper().writeValueAsString(observationMessage);
+            RecObservationMessage recObservationMessage = new RecObservationMessage(observationMessage);
+            String observationJson = objectMapper.getObjectMapper().writeValueAsString(recObservationMessage);
+            log.trace("Publishing RecObservationMessage: {}", observationJson);
             Message telemetryMessage = new Message(observationJson);
             String messageId = UUID.randomUUID().toString();
             telemetryMessage.setMessageId(messageId);

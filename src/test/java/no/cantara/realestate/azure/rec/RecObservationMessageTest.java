@@ -34,7 +34,7 @@ class RecObservationMessageTest {
         Instant observedAt = Instant.now().minusSeconds(10);
         Instant receivedAt = Instant.now();
         ObservationMessage observationMessage = new ObservationMessageBuilder()
-                .withRecId("rec1")
+                .withSensorId("rec1")
                 .withRealEstate("RE1")
                 .withBuilding("Building1")
                 .withFloor("04")
@@ -45,8 +45,8 @@ class RecObservationMessageTest {
                 .withElectricityZone("light")
                 .withSensorType("temp")
                 .withMeasurementUnit("C")
-                .withObservedValue(22)
-                .withObservedAt(observedAt)
+                .withValue(22)
+                .withObservationTime(observedAt)
                 .withReceivedAt(receivedAt)
                 .withTfm("TFM12345")
                 .build();

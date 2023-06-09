@@ -25,12 +25,13 @@ public class RecObservationJsonTest {
 
     @Test
     void validateRecJsonFormat() throws JsonProcessingException, JSONException {
+        //FIXME add "observationTime": "2019-05-27T20:07:44Z  "
         String observationJson = objectMapper.getObjectMapper().writeValueAsString(recObservationMessage);
         assertNotNull(observationJson);
         System.out.println(observationJson);
         String expectedJson = """
                 {
-                  "recId": "rec1",
+                  "sensorId": "rec1",
                   "tfm": "TFM12345",
                   "realEstate": "RE1",
                   "building": "Building1",
@@ -43,10 +44,9 @@ public class RecObservationJsonTest {
                   "name": null,
                   "sensorType": "temp",
                   "measurementUnit": "C",
-                  "observedValue": 22,
-                  "observedAt": null,
+                  "value": 22,
+                  "observationTime": null,
                   "receivedAt": null,
-                  "sensorId": "rec1",
                   "quantityKind": "https://w3id.org/rec/core/Temperature"
                 }
                 """;
@@ -55,7 +55,7 @@ public class RecObservationJsonTest {
 
     public static ObservationMessage buildStubObservation() {
         ObservationMessage observationMessage = new ObservationMessageBuilder()
-                .withRecId("rec1")
+                .withSensorId("rec1")
                 .withRealEstate("RE1")
                 .withBuilding("Building1")
                 .withFloor("04")
@@ -66,7 +66,7 @@ public class RecObservationJsonTest {
                 .withElectricityZone("light")
                 .withSensorType("temp")
                 .withMeasurementUnit("C")
-                .withObservedValue(22)
+                .withValue(22)
                 .withTfm("TFM12345")
                 .build();
         return observationMessage;

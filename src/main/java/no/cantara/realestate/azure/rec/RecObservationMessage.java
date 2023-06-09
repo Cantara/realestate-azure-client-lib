@@ -10,7 +10,6 @@ public class RecObservationMessage extends ObservationMessage {
     private final String CO2 = "co2";
     private final String PRESCENCE = "tilstedevarelse";
     private String quantityKind;
-    private String sensorId;
 
     public RecObservationMessage() {
     }
@@ -29,12 +28,8 @@ public class RecObservationMessage extends ObservationMessage {
             }
         }
         addQuantityKind(observationMessage.getSensorType());
-        addSensorId(observationMessage.getRecId());
     }
 
-    private void addSensorId(String recId) {
-        this.sensorId = recId;
-    }
 
     public void addQuantityKind(String sensorType) {
         if (sensorType != null) {
@@ -63,11 +58,9 @@ public class RecObservationMessage extends ObservationMessage {
         this.quantityKind = quantityKind;
     }
 
-    public String getSensorId() {
-        return sensorId;
-    }
-
-    public void setSensorId(String sensorId) {
-        this.sensorId = sensorId;
+    @Override
+    public void setSensorType(String sensorType) {
+        super.setSensorType(sensorType);
+        addQuantityKind(sensorType);
     }
 }
