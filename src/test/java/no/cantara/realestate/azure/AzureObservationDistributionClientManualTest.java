@@ -1,5 +1,6 @@
 package no.cantara.realestate.azure;
 
+import no.cantara.config.ApplicationProperties;
 import no.cantara.realestate.observations.ObservationMessage;
 import no.cantara.realestate.observations.ObservationMessageBuilder;
 import org.slf4j.Logger;
@@ -14,14 +15,21 @@ class AzureObservationDistributionClientManualTest {
     private static final Logger log = getLogger(AzureObservationDistributionClientManualTest.class);
 
     public static void main(String[] args) throws InterruptedException {
-        if (args.length < 1) {
-            log.error("You need to provide \"primary connection string\" from a Device registered in Azure IoTHub.\n" +
-                    "Enter this string as the first argument when running this class.");
-            System.exit(0);
+        boolean useConfig = true;
+        AzureObservationDistributionClient deviceClient;
+        if (useConfig) {
+            ApplicationProperties config = ApplicationProperties.builder().buildAndSetStaticSingleton();
+            deviceClient = new AzureObservationDistributionClient();
+        } else {
+            if (args.length < 1) {
+                log.error("You need to provide \"primary connection string\" from a Device registered in Azure IoTHub.\n" +
+                        "Enter this string as the first argument when running this class.");
+                System.exit(0);
+            }
+            String connectionString = args[0];
+            log.debug("ConnectionString {}", connectionString);
+            deviceClient = new AzureObservationDistributionClient(connectionString);
         }
-        String connectionString = args[0];
-        log.debug("ConnectionString {}", connectionString);
-        AzureObservationDistributionClient deviceClient = new AzureObservationDistributionClient(connectionString);
         deviceClient.openConnection();
         assertTrue(deviceClient.isConnectionEstablished());
         log.info("Establishing and verifying connection.");

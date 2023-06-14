@@ -31,3 +31,6 @@ replay_pid*
 # Build
 target/
 dependency-reduced-pom.xml
+
+# Config
+local_override.properties

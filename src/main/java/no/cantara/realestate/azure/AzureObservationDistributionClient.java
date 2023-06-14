@@ -5,6 +5,7 @@ import com.microsoft.azure.sdk.iot.device.Message;
 import com.microsoft.azure.sdk.iot.device.MessageSentCallback;
 import com.microsoft.azure.sdk.iot.device.MessageType;
 import com.microsoft.azure.sdk.iot.device.exceptions.IotHubClientException;
+import no.cantara.realestate.RealEstateException;
 import no.cantara.realestate.azure.iot.AzureDeviceClient;
 import no.cantara.realestate.azure.rec.RecObservationMessage;
 import no.cantara.realestate.distribution.ObservationDistributionClient;
@@ -25,6 +26,7 @@ import static org.slf4j.LoggerFactory.getLogger;
 public class AzureObservationDistributionClient implements ObservationDistributionClient {
     private static final Logger log = getLogger(AzureObservationDistributionClient.class);
     private static final int DEFAULT_MAX_SIZE = 1000;
+    public static final String CONNECTIONSTRING_KEY = "distribution.azure.connectionString";
 
     private final AzureDeviceClient azureDeviceClient;
     private final RealEstateObjectMapper objectMapper;
@@ -36,6 +38,15 @@ public class AzureObservationDistributionClient implements ObservationDistributi
      */
     protected AzureObservationDistributionClient(AzureDeviceClient azureDeviceClient) {
         this.azureDeviceClient = azureDeviceClient;
+        objectMapper = RealEstateObjectMapper.getInstance();
+    }
+
+    public AzureObservationDistributionClient() {
+        String devicePrimaryConnectionString = no.cantara.config.ApplicationProperties.getInstance().get(CONNECTIONSTRING_KEY);
+        if (devicePrimaryConnectionString == null || devicePrimaryConnectionString.isEmpty()) {
+            throw new RealEstateException("ConnectionString is missing. Please provide " + CONNECTIONSTRING_KEY + "= in local_override.properties.");
+        }
+        azureDeviceClient = new AzureDeviceClient(devicePrimaryConnectionString);
         objectMapper = RealEstateObjectMapper.getInstance();
     }
 

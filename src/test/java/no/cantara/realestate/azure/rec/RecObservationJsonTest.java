@@ -25,7 +25,6 @@ public class RecObservationJsonTest {
 
     @Test
     void validateRecJsonFormat() throws JsonProcessingException, JSONException {
-        //FIXME add "observationTime": "2019-05-27T20:07:44Z  "
         String observationJson = objectMapper.getObjectMapper().writeValueAsString(recObservationMessage);
         assertNotNull(observationJson);
         System.out.println(observationJson);
