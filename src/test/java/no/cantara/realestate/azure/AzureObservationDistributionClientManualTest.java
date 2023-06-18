@@ -15,7 +15,7 @@ class AzureObservationDistributionClientManualTest {
     private static final Logger log = getLogger(AzureObservationDistributionClientManualTest.class);
 
     public static void main(String[] args) throws InterruptedException {
-        boolean useConfig = true;
+        boolean useConfig = false;
         AzureObservationDistributionClient deviceClient;
         if (useConfig) {
             ApplicationProperties config = ApplicationProperties.builder().buildAndSetStaticSingleton();
@@ -45,7 +45,7 @@ class AzureObservationDistributionClientManualTest {
         }
     }
 
-    private static ObservationMessage buildStubObservation() {
+    public static ObservationMessage buildStubObservation() {
         Instant observedAt = Instant.now().minusSeconds(10);
         Instant receivedAt = Instant.now();
         ObservationMessage observationMessage = new ObservationMessageBuilder()

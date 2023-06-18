@@ -1,10 +1,12 @@
 package no.cantara.realestate.azure;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.google.auto.service.AutoService;
 import com.microsoft.azure.sdk.iot.device.Message;
 import com.microsoft.azure.sdk.iot.device.MessageSentCallback;
 import com.microsoft.azure.sdk.iot.device.MessageType;
 import com.microsoft.azure.sdk.iot.device.exceptions.IotHubClientException;
+import no.cantara.realestate.ExceptionStatusType;
 import no.cantara.realestate.RealEstateException;
 import no.cantara.realestate.azure.iot.AzureDeviceClient;
 import no.cantara.realestate.azure.rec.RecObservationMessage;
@@ -23,6 +25,7 @@ import java.util.UUID;
 import static com.microsoft.azure.sdk.iot.device.IotHubStatusCode.OK;
 import static org.slf4j.LoggerFactory.getLogger;
 
+@AutoService(ObservationDistributionClient.class)
 public class AzureObservationDistributionClient implements ObservationDistributionClient {
     private static final Logger log = getLogger(AzureObservationDistributionClient.class);
     private static final int DEFAULT_MAX_SIZE = 1000;
@@ -32,6 +35,7 @@ public class AzureObservationDistributionClient implements ObservationDistributi
     private final RealEstateObjectMapper objectMapper;
     private List<ObservationMessage> observedMessages = new LimitedArrayList(DEFAULT_MAX_SIZE);
     private Map<String, ObservationMessage> messagesAwaitingSentAck = new HashMap<>();
+    private long numberOfMessagesObserved = 0;
 
     /*
     Intended used for testing.
@@ -59,6 +63,10 @@ public class AzureObservationDistributionClient implements ObservationDistributi
         objectMapper = RealEstateObjectMapper.getInstance();
     }
 
+    public String getName() {
+        return "AzureObservationDistributionClient";
+    }
+
     /**
      *   Message message = PnpConvention.createIotHubMessageUtf8(telemetryName, currentTemperature, componentName);
      *         deviceClient.sendEventAsync(message, new MessageSentCallback(), message);
@@ -71,6 +79,9 @@ public class AzureObservationDistributionClient implements ObservationDistributi
     }
     @Override
     public void publish(ObservationMessage observationMessage) {
+        if (!isConnectionEstablished()) {
+            throw new RealEstateException("Connection must explicitly be opened before publishing messages.", ExceptionStatusType.RETRY_NOT_POSSIBLE);
+        }
         if (observationMessage == null) {
             log.trace("Missing observations message, not able to publish");
             return;
@@ -87,10 +98,20 @@ public class AzureObservationDistributionClient implements ObservationDistributi
             telemetryMessage.setContentType("application/json");
             messagesAwaitingSentAck.put(messageId, observationMessage);
             azureDeviceClient.sendEventAsync(telemetryMessage, new ObservationMessageSentCallback(this));
+            if (numberOfMessagesObserved < Long.MAX_VALUE) {
+                numberOfMessagesObserved ++;
+            } else {
+                numberOfMessagesObserved = 1;
+            }
         } catch (JsonProcessingException e) {
             throw new RuntimeException(e);
         }
 
+    }
+
+    @Override
+    public long getNumberOfMessagesObserved() {
+        return numberOfMessagesObserved;
     }
 
     @Override
