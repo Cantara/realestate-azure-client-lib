@@ -16,7 +16,10 @@ class AzureDeviceClientManualTest {
         AzureDeviceClient deviceClient;
         ApplicationProperties config;
         if (useConfig) {
-            config = ApplicationProperties.builder().buildAndSetStaticSingleton();
+            config = ApplicationProperties.builder()
+                    .defaults()
+                    .buildAndSetStaticSingleton();
+
             deviceClient = new AzureDeviceClient(config.get(AzureObservationDistributionClient.CONNECTIONSTRING_KEY));
         } else {
             if (args.length < 1) {

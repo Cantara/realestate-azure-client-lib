@@ -15,10 +15,10 @@ class AzureObservationDistributionClientManualTest {
     private static final Logger log = getLogger(AzureObservationDistributionClientManualTest.class);
 
     public static void main(String[] args) throws InterruptedException {
-        boolean useConfig = false;
+        boolean useConfig = true;
         AzureObservationDistributionClient deviceClient;
         if (useConfig) {
-            ApplicationProperties config = ApplicationProperties.builder().buildAndSetStaticSingleton();
+            ApplicationProperties config = ApplicationProperties.builder().defaults().buildAndSetStaticSingleton();
             deviceClient = new AzureObservationDistributionClient();
         } else {
             if (args.length < 1) {
@@ -37,6 +37,8 @@ class AzureObservationDistributionClientManualTest {
         if (deviceClient.isConnectionEstablished()) {
             ObservationMessage observationMessage = buildStubObservation();
             deviceClient.publish(observationMessage);
+            Thread.sleep(1000);
+            deviceClient.publish(buildStubObservation());
             log.info("Sleeping for 10 seconds.");
             Thread.sleep(10000);
             deviceClient.closeConnection();

@@ -150,6 +150,9 @@ public class AzureObservationDistributionClient implements ObservationDistributi
         @Override
         public void onMessageSent(Message sentMessage, IotHubClientException exception, Object callbackContext) {
             Message msg = (Message) callbackContext;
+            if (exception != null) {
+                log.warn("****");
+            }
             log.debug("Observation - Response from IoT Hub: message Id={}, status={}", msg.getMessageId(), exception == null ? OK : exception.getStatusCode());
             distributionClient.messageSent(sentMessage);
         }
