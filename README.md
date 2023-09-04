@@ -27,7 +27,7 @@ Establishing and verifying connection to Azure.
 "AzureObservationDistributionClient-numberofMessagesObserved: ": "1",
 ```
 
-### Veriyf data in Azure IoT Hub
+### Verify data in Azure IoT Hub
 In the IoT Hub, select the "Metrics" menu item.
 Create a new chart with the following settings:
 ```
