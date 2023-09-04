@@ -41,7 +41,7 @@ See the official [Azure Data Explorer documentation](https://docs.microsoft.com/
 
 ### Create Data Connection from IoT Hub to Azure Data Explorer
 In the "Overview" of the Azure Data Explorer database, select the "IoT Hub" button, under "Data connections".
-See the officail [Azure Data Explorer documentation](https://docs.microsoft.com/en-us/azure/data-explorer/create-iot-hub-connection?tabs=portal) for details.
+See the official [Azure Data Explorer documentation](https://docs.microsoft.com/en-us/azure/data-explorer/create-iot-hub-connection?tabs=portal) for details.
 
 ### Mapping of CloudConnector observations to  Json Telemetry Mapping
 See [JsonMapping input from IoTHub to ADX](https://learn.microsoft.com/en-us/azure/data-explorer/kusto/management/json-mapping) for details.
@@ -75,6 +75,18 @@ See [JsonMapping input from IoTHub to ADX](https://learn.microsoft.com/en-us/azu
  	....
 ```
 See [JsonTelemetryMapping](./JsonTelemetryMapping.json) for the full mapping.
+
+## Dashboard
+In Azure Data Explorer, select "Dashboard" and create a new dashboard.
+Query for CO2 observations in all rooms, for a single floor:
+```
+RealestateTelemetry
+| project placementRoom,building,floor,realEstate,sensorType, observationTime, value
+| where realEstate == "511" and building == "511" and floor in ("1", "01") 
+| where sensorType == "CO2"
+| where observationTime  between (['_startTime'] .. ['_endTime']) 
+```
+"RealestateTelemetry" is the name of the table created above.
 
 
 # Development
