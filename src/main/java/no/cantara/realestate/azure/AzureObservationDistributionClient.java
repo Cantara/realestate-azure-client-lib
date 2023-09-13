@@ -17,10 +17,7 @@ import no.cantara.realestate.utils.LimitedArrayList;
 import org.slf4j.Logger;
 
 import java.nio.charset.StandardCharsets;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 
 import static com.microsoft.azure.sdk.iot.device.IotHubStatusCode.OK;
 import static org.slf4j.LoggerFactory.getLogger;
@@ -87,15 +84,8 @@ public class AzureObservationDistributionClient implements ObservationDistributi
             return;
         }
         try {
-            RecObservationMessage recObservationMessage = new RecObservationMessage(observationMessage);
-            String observationJson = objectMapper.getObjectMapper().writeValueAsString(recObservationMessage);
-            log.trace("Publishing RecObservationMessage: {}", observationJson);
-            Message telemetryMessage = new Message(observationJson);
-            String messageId = UUID.randomUUID().toString();
-            telemetryMessage.setMessageId(messageId);
-            telemetryMessage.setMessageType(MessageType.DEVICE_TELEMETRY);
-            telemetryMessage.setContentEncoding(StandardCharsets.UTF_8.name());
-            telemetryMessage.setContentType("application/json");
+            Message telemetryMessage = buildTelemetryMessage(observationMessage);
+            String messageId = telemetryMessage.getMessageId();
             messagesAwaitingSentAck.put(messageId, observationMessage);
             azureDeviceClient.sendEventAsync(telemetryMessage, new ObservationMessageSentCallback(this));
             if (numberOfMessagesObserved < Long.MAX_VALUE) {
@@ -107,6 +97,19 @@ public class AzureObservationDistributionClient implements ObservationDistributi
             throw new RuntimeException(e);
         }
 
+    }
+
+    protected Message buildTelemetryMessage(ObservationMessage observationMessage) throws JsonProcessingException {
+        RecObservationMessage recObservationMessage = new RecObservationMessage(observationMessage);
+        String observationJson = objectMapper.getObjectMapper().writeValueAsString(recObservationMessage);
+        log.trace("Publishing RecObservationMessage: {}", observationJson);
+        Message telemetryMessage = new Message(observationJson);
+        String messageId = UUID.randomUUID().toString();
+        telemetryMessage.setMessageId(messageId);
+        telemetryMessage.setMessageType(MessageType.DEVICE_TELEMETRY);
+        telemetryMessage.setContentEncoding(StandardCharsets.UTF_8.name());
+        telemetryMessage.setContentType("application/json");
+        return telemetryMessage;
     }
 
     @Override
@@ -137,6 +140,14 @@ public class AzureObservationDistributionClient implements ObservationDistributi
         if (azureDeviceClient != null) {
             azureDeviceClient.closeConnection();
         }
+    }
+
+    protected Map<String, ObservationMessage> getMessagesAwaitingSentAck() {
+        return messagesAwaitingSentAck;
+    }
+
+    public Collection<ObservationMessage> getMessagesAwaitingSentAckCollection() {
+        return messagesAwaitingSentAck.values();
     }
 
     private static class ObservationMessageSentCallback implements MessageSentCallback {
