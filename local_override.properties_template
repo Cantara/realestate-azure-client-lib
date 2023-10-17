@@ -1,1 +1,3 @@
 distribution.azure.connectionString=<insert from Azure Console>
+sensormappings.azure.connectionString=<insert from Azure Console>
+sensormappings.azure.tableName=<insert from Azure Console>
