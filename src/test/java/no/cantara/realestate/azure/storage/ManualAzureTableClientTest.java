@@ -13,8 +13,8 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.slf4j.LoggerFactory.getLogger;
 
-class AzureTableClientTest {
-    private static final Logger log = getLogger(AzureTableClientTest.class);
+class ManualAzureTableClientTest {
+    private static final Logger log = getLogger(ManualAzureTableClientTest.class);
 
     public static void main(String[] args) {
         boolean useConfig = true;
