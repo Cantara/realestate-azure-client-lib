@@ -60,6 +60,7 @@ public class AzureTableClient {
                     }
                 }
             }
+            stringRows.add(stringRow);
         }
         return stringRows;
     }
