@@ -3,6 +3,7 @@ package no.cantara.realestate.azure.storage;
 import com.azure.data.tables.TableClient;
 import com.azure.data.tables.TableClientBuilder;
 import com.azure.data.tables.models.ListEntitiesOptions;
+import com.azure.data.tables.models.TableEntity;
 import org.slf4j.Logger;
 
 import java.util.ArrayList;
@@ -17,7 +18,7 @@ public class AzureTableClient {
 
     private final TableClient tableClient;
 
-    protected AzureTableClient(TableClient tableClient) {
+    public AzureTableClient(TableClient tableClient) {
         this.tableClient = tableClient;
     }
 
@@ -63,5 +64,10 @@ public class AzureTableClient {
             stringRows.add(stringRow);
         }
         return stringRows;
+    }
+    public void updateRow(String partitionKey, String rowKey, Map<String, Object> properties) {
+        TableEntity tableEntity = new TableEntity(partitionKey, rowKey);
+        properties.forEach((key, value) -> tableEntity.addProperty(key, value));
+        tableClient.updateEntity(tableEntity);
     }
 }
