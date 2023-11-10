@@ -35,6 +35,7 @@ public class TrendIdsTableAdmin {
         testTrendProperties.put("LastUpdatedAt", Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toString());
         testTrendProperties.put("DigitalTwinSensorId", testTrend.getProperty("DigitalTwinSensorId"));
         testTrendProperties.put("DigitalTwintName", testTrend.getProperty("DigitalTwintName"));
+        testTrendProperties.put("DesigoId", null);
         azureTableClient.updateRow("Desigo", "TestTrendTrend1", testTrendProperties);
 
 //        tableClient.listEntities().forEach(tableEntity -> log.info("TableEntity: {}", tableEntity));

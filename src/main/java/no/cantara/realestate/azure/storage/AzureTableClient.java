@@ -7,6 +7,7 @@ import com.azure.data.tables.models.TableEntity;
 import no.cantara.realestate.RealEstateException;
 import org.slf4j.Logger;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -77,7 +78,12 @@ public class AzureTableClient {
     public void updateRow(String partitionKey, String rowKey, Map<String, Object> properties) throws RealEstateException {
         try {
             TableEntity tableEntity = new TableEntity(partitionKey, rowKey);
-            properties.forEach((key, value) -> tableEntity.addProperty(key, value));
+            properties.forEach((key, value) -> {
+                if (value instanceof Instant) {
+                    value = ((Instant) value).truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toString();
+                }
+                tableEntity.addProperty(key, value);
+            });
             tableClient.updateEntity(tableEntity);
         } catch (Exception e) {
             RealEstateException realEstateException = new RealEstateException("Could not update row with partitionKey " + partitionKey + " and rowKey " + rowKey + ", properties " + properties, e);
