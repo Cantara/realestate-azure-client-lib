@@ -10,6 +10,7 @@ import com.microsoft.azure.sdk.iot.device.MessageType;
 import com.microsoft.azure.sdk.iot.device.exceptions.IotHubClientException;
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.SpanKind;
 import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.context.Scope;
 import no.cantara.realestate.ExceptionStatusType;
@@ -47,14 +48,14 @@ public class AzureObservationDistributionClient implements ObservationDistributi
     Intended used for testing.
      */
     protected AzureObservationDistributionClient(AzureDeviceClient azureDeviceClient) {
-        tracer = GlobalOpenTelemetry.getTracer("no.cantara.realestate");
+        tracer = GlobalOpenTelemetry.getTracer("OTEL.AzureMonitor.AzureObservationDistributionClient");
         telemetryClient = new TelemetryClient();
         this.azureDeviceClient = azureDeviceClient;
         objectMapper = RealEstateObjectMapper.getInstance();
     }
 
     public AzureObservationDistributionClient() {
-        tracer = GlobalOpenTelemetry.getTracer("no.cantara.realestate");
+        tracer = GlobalOpenTelemetry.getTracer("OTEL.AzureMonitor.AzureObservationDistributionClient");
         telemetryClient = new TelemetryClient();
         String devicePrimaryConnectionString = no.cantara.config.ApplicationProperties.getInstance().get(CONNECTIONSTRING_KEY);
         if (devicePrimaryConnectionString == null || devicePrimaryConnectionString.isEmpty()) {
@@ -69,7 +70,7 @@ public class AzureObservationDistributionClient implements ObservationDistributi
      * @param devicePrimaryConnectionString retreived from Azure Portal, IoT Hub, Devices, Select Device, Primary connection string
      */
     public AzureObservationDistributionClient(String devicePrimaryConnectionString) {
-        tracer = GlobalOpenTelemetry.getTracer("no.cantara.realestate");
+        tracer = GlobalOpenTelemetry.getTracer("OTEL.AzureMonitor.AzureObservationDistributionClient");
         telemetryClient = new TelemetryClient();
         azureDeviceClient = new AzureDeviceClient(devicePrimaryConnectionString);
         objectMapper = RealEstateObjectMapper.getInstance();
@@ -92,8 +93,8 @@ public class AzureObservationDistributionClient implements ObservationDistributi
     @Override
     public void publish(ObservationMessage observationMessage) {
         long startTime = System.currentTimeMillis();
-        Span span = tracer.spanBuilder("publish-observationmessage").startSpan();
-        telemetryClient.trackEvent("publish-observationmessage");
+        Span span = tracer.spanBuilder("publishObservationmessage").setSpanKind(SpanKind.CLIENT).startSpan();
+        telemetryClient.trackEvent("publishObservationmessage");
         if (!isConnectionEstablished()) {
             telemetryClient.trackEvent("error-publish-observationmessage-not-connected");
             throw new RealEstateException("Connection must explicitly be opened before publishing messages.", ExceptionStatusType.RETRY_NOT_POSSIBLE);
