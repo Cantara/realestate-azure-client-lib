@@ -2,10 +2,16 @@ package no.cantara.realestate.azure;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.google.auto.service.AutoService;
+import com.microsoft.applicationinsights.TelemetryClient;
+import com.microsoft.applicationinsights.telemetry.RemoteDependencyTelemetry;
 import com.microsoft.azure.sdk.iot.device.Message;
 import com.microsoft.azure.sdk.iot.device.MessageSentCallback;
 import com.microsoft.azure.sdk.iot.device.MessageType;
 import com.microsoft.azure.sdk.iot.device.exceptions.IotHubClientException;
+import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.Tracer;
+import io.opentelemetry.context.Scope;
 import no.cantara.realestate.ExceptionStatusType;
 import no.cantara.realestate.RealEstateException;
 import no.cantara.realestate.azure.iot.AzureDeviceClient;
@@ -34,15 +40,22 @@ public class AzureObservationDistributionClient implements ObservationDistributi
     private Map<String, ObservationMessage> messagesAwaitingSentAck = new HashMap<>();
     private long numberOfMessagesObserved = 0;
 
+    private final Tracer tracer;
+    private final TelemetryClient telemetryClient;
+
     /*
     Intended used for testing.
      */
     protected AzureObservationDistributionClient(AzureDeviceClient azureDeviceClient) {
+        tracer = GlobalOpenTelemetry.getTracer("no.cantara.realestate");
+        telemetryClient = new TelemetryClient();
         this.azureDeviceClient = azureDeviceClient;
         objectMapper = RealEstateObjectMapper.getInstance();
     }
 
     public AzureObservationDistributionClient() {
+        tracer = GlobalOpenTelemetry.getTracer("no.cantara.realestate");
+        telemetryClient = new TelemetryClient();
         String devicePrimaryConnectionString = no.cantara.config.ApplicationProperties.getInstance().get(CONNECTIONSTRING_KEY);
         if (devicePrimaryConnectionString == null || devicePrimaryConnectionString.isEmpty()) {
             throw new RealEstateException("ConnectionString is missing. Please provide " + CONNECTIONSTRING_KEY + "= in local_override.properties.");
@@ -56,6 +69,8 @@ public class AzureObservationDistributionClient implements ObservationDistributi
      * @param devicePrimaryConnectionString retreived from Azure Portal, IoT Hub, Devices, Select Device, Primary connection string
      */
     public AzureObservationDistributionClient(String devicePrimaryConnectionString) {
+        tracer = GlobalOpenTelemetry.getTracer("no.cantara.realestate");
+        telemetryClient = new TelemetryClient();
         azureDeviceClient = new AzureDeviceClient(devicePrimaryConnectionString);
         objectMapper = RealEstateObjectMapper.getInstance();
     }
@@ -76,14 +91,21 @@ public class AzureObservationDistributionClient implements ObservationDistributi
     }
     @Override
     public void publish(ObservationMessage observationMessage) {
+        long startTime = System.currentTimeMillis();
+        Span span = tracer.spanBuilder("publish-observationmessage").startSpan();
+        telemetryClient.trackEvent("publish-observationmessage");
         if (!isConnectionEstablished()) {
+            telemetryClient.trackEvent("error-publish-observationmessage-not-connected");
             throw new RealEstateException("Connection must explicitly be opened before publishing messages.", ExceptionStatusType.RETRY_NOT_POSSIBLE);
         }
         if (observationMessage == null) {
+            telemetryClient.trackEvent("trace-publish-observationmessage-null");
             log.trace("Missing observations message, not able to publish");
             return;
         }
-        try {
+        boolean success = false;
+
+        try (Scope ignored = span.makeCurrent()) {
             Message telemetryMessage = buildTelemetryMessage(observationMessage);
             String messageId = telemetryMessage.getMessageId();
             messagesAwaitingSentAck.put(messageId, observationMessage);
@@ -93,8 +115,16 @@ public class AzureObservationDistributionClient implements ObservationDistributi
             } else {
                 numberOfMessagesObserved = 1;
             }
+            success = true;
         } catch (JsonProcessingException e) {
+            span.recordException(e);
             throw new RuntimeException(e);
+        } finally {
+            span.end();
+            RemoteDependencyTelemetry telemetry = new RemoteDependencyTelemetry();
+            telemetry.setSuccess(success);
+            telemetry.setTimestamp(new Date(startTime));
+            telemetryClient.trackDependency(telemetry);
         }
 
     }
