@@ -94,6 +94,7 @@ public class AzureObservationDistributionClient implements ObservationDistributi
     public void publish(ObservationMessage observationMessage) {
         long startTime = System.currentTimeMillis();
         Span span = tracer.spanBuilder("publishObservationmessage").setSpanKind(SpanKind.CLIENT).startSpan();
+        span.setAttribute("destination.address", "testhostTODO");
         telemetryClient.trackEvent("publishObservationmessage");
         if (!isConnectionEstablished()) {
             telemetryClient.trackEvent("error-publish-observationmessage-not-connected");
