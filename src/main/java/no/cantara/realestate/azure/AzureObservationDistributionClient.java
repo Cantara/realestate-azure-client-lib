@@ -3,6 +3,7 @@ package no.cantara.realestate.azure;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.google.auto.service.AutoService;
 import com.microsoft.applicationinsights.TelemetryClient;
+import com.microsoft.applicationinsights.telemetry.Duration;
 import com.microsoft.applicationinsights.telemetry.RemoteDependencyTelemetry;
 import com.microsoft.azure.sdk.iot.device.Message;
 import com.microsoft.azure.sdk.iot.device.MessageSentCallback;
@@ -11,6 +12,7 @@ import com.microsoft.azure.sdk.iot.device.exceptions.IotHubClientException;
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanKind;
+import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.context.Scope;
 import no.cantara.realestate.ExceptionStatusType;
@@ -71,6 +73,8 @@ public class AzureObservationDistributionClient implements ObservationDistributi
      */
     public AzureObservationDistributionClient(String devicePrimaryConnectionString) {
         tracer = GlobalOpenTelemetry.getTracer("OTEL.AzureMonitor.AzureObservationDistributionClient");
+//        final Tracer tracer = GlobalOpenTelemetry.getTracer("no.messom.lekerseg");
+//
         telemetryClient = new TelemetryClient();
         azureDeviceClient = new AzureDeviceClient(devicePrimaryConnectionString);
         objectMapper = RealEstateObjectMapper.getInstance();
@@ -93,40 +97,80 @@ public class AzureObservationDistributionClient implements ObservationDistributi
     @Override
     public void publish(ObservationMessage observationMessage) {
         long startTime = System.currentTimeMillis();
-        Span span = tracer.spanBuilder("publishObservationmessage").setSpanKind(SpanKind.CLIENT).startSpan();
-        span.setAttribute("destination.address", "testhostTODO");
-        telemetryClient.trackEvent("publishObservationmessage");
-        if (!isConnectionEstablished()) {
-            telemetryClient.trackEvent("error-publish-observationmessage-not-connected");
-            throw new RealEstateException("Connection must explicitly be opened before publishing messages.", ExceptionStatusType.RETRY_NOT_POSSIBLE);
-        }
-        if (observationMessage == null) {
-            telemetryClient.trackEvent("trace-publish-observationmessage-null");
-            log.trace("Missing observations message, not able to publish");
-            return;
-        }
-        boolean success = false;
-
-        try (Scope ignored = span.makeCurrent()) {
-            Message telemetryMessage = buildTelemetryMessage(observationMessage);
-            String messageId = telemetryMessage.getMessageId();
-            messagesAwaitingSentAck.put(messageId, observationMessage);
-            azureDeviceClient.sendEventAsync(telemetryMessage, new ObservationMessageSentCallback(this));
-            if (numberOfMessagesObserved < Long.MAX_VALUE) {
-                numberOfMessagesObserved ++;
-            } else {
-                numberOfMessagesObserved = 1;
+        log.info("Tracer: {}", tracer);
+        Span parentSpan = tracer.spanBuilder("IotHub").startSpan();
+        try (Scope scope = parentSpan.makeCurrent()) {
+//        Span span = tracer.spanBuilder("publishObservationmessage").setSpanKind(SpanKind.CLIENT).startSpan();
+//        span.setAttribute("destination.address", "testhostTODO");
+            telemetryClient.trackEvent("publishObservationmessage");
+            if (!isConnectionEstablished()) {
+                telemetryClient.trackEvent("error-publish-observationmessage-not-connected");
+                throw new RealEstateException("Connection must explicitly be opened before publishing messages.", ExceptionStatusType.RETRY_NOT_POSSIBLE);
             }
-            success = true;
-        } catch (JsonProcessingException e) {
-            span.recordException(e);
-            throw new RuntimeException(e);
-        } finally {
-            span.end();
-            RemoteDependencyTelemetry telemetry = new RemoteDependencyTelemetry();
-            telemetry.setSuccess(success);
-            telemetry.setTimestamp(new Date(startTime));
-            telemetryClient.trackDependency(telemetry);
+            if (observationMessage == null) {
+                telemetryClient.trackEvent("trace-publish-observationmessage-null");
+                log.trace("Missing observations message, not able to publish");
+                return;
+            }
+            boolean success = false;
+            Span childSpan = tracer.spanBuilder("SendTelemetry").setSpanKind(SpanKind.CLIENT).startSpan();
+            childSpan.setAttribute("appName", "IoTHubClient");
+            childSpan.setAttribute("server.address", "cludconnectorhub-test-west.azure-devices.net");
+            childSpan.setAttribute("http.method", "GET");
+            childSpan.setAttribute("http.url", "https://cludconnectorhub-test-west.azure-devices.net/");
+
+            try(Scope childScope = childSpan.makeCurrent()) {
+//            try (Scope ignored = span.makeCurrent()) {
+                Message telemetryMessage = buildTelemetryMessage(observationMessage);
+                String messageId = telemetryMessage.getMessageId();
+                messagesAwaitingSentAck.put(messageId, observationMessage);
+                azureDeviceClient.sendEventAsync(telemetryMessage, new MessageSentCallback() {
+                    @Override
+                    public void onMessageSent(Message sentMessage, IotHubClientException iotHubClientException, Object callbackContext) {
+                        Message msg = (Message) callbackContext;
+                        long elapsedTime = System.currentTimeMillis() - startTime;
+                        Duration duration = new Duration(elapsedTime);
+                        RemoteDependencyTelemetry dependencyTelemetry = new RemoteDependencyTelemetry("IotHub", "SendEventAsync", duration, true);
+                        dependencyTelemetry.setTarget("IotHubNorway.messom.no");
+                        dependencyTelemetry.setType("PC"); //--> Device_Type=PC, need Client_Type=PC
+                        //koble denne målingen til en eller annen "parent"
+                        if (iotHubClientException != null) {
+                            dependencyTelemetry.setSuccess(false);
+                            childSpan.setStatus(StatusCode.ERROR, iotHubClientException.getMessage());
+                            childSpan.setAttribute("http.response.status_code", "500");
+                            childSpan.addEvent("Failed to send message");
+                            childSpan.recordException(iotHubClientException);
+                            log.error("Error sending message", iotHubClientException);
+                        } else {
+                            //telemetryClient.TrackDependency("myDependencyType", "myDependencyCall", "myDependencyData",  startTime, timer.Elapsed, success);
+                            log.info("Message sent: {}", sentMessage);
+                            childSpan.setStatus(StatusCode.OK, "Message sent");
+                            childSpan.setAttribute("http.response.status_code", "200");
+                            childSpan.addEvent("Message sent");
+                        }
+                        log.debug("Observation - Response from IoT Hub: message Id={}, status={}", msg.getMessageId(), iotHubClientException == null ? OK : iotHubClientException.getStatusCode());
+                        messageSent(sentMessage);
+                    }
+                });
+                if (numberOfMessagesObserved < Long.MAX_VALUE) {
+                    numberOfMessagesObserved++;
+                } else {
+                    numberOfMessagesObserved = 1;
+                }
+                success = true;
+            } catch (JsonProcessingException e) {
+                childSpan.recordException(e);
+                childSpan.setStatus(StatusCode.ERROR, e.getMessage());
+                childSpan.setAttribute("http.response.status_code", "500");
+                childSpan.addEvent("Failed to parse message: " + observationMessage);
+                throw new RuntimeException(e);
+            } finally {
+                childSpan.end();
+                RemoteDependencyTelemetry telemetry = new RemoteDependencyTelemetry();
+                telemetry.setSuccess(success);
+                telemetry.setTimestamp(new Date(startTime));
+                telemetryClient.trackDependency(telemetry);
+            }
         }
 
     }
