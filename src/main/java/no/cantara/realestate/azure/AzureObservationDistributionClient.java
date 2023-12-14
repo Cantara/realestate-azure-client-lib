@@ -171,6 +171,8 @@ public class AzureObservationDistributionClient implements ObservationDistributi
                 telemetry.setTimestamp(new Date(startTime));
                 telemetryClient.trackDependency(telemetry);
             }
+        } finally {
+            parentSpan.end();
         }
 
     }
