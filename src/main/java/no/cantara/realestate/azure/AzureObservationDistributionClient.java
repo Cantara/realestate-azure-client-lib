@@ -22,6 +22,7 @@ import no.cantara.realestate.azure.rec.RecObservationMessage;
 import no.cantara.realestate.distribution.ObservationDistributionClient;
 import no.cantara.realestate.json.RealEstateObjectMapper;
 import no.cantara.realestate.observations.ObservationMessage;
+import no.cantara.realestate.plugins.distribution.DistributionService;
 import no.cantara.realestate.utils.LimitedArrayList;
 import org.slf4j.Logger;
 
@@ -32,7 +33,7 @@ import static com.microsoft.azure.sdk.iot.device.IotHubStatusCode.OK;
 import static org.slf4j.LoggerFactory.getLogger;
 
 @AutoService(ObservationDistributionClient.class)
-public class AzureObservationDistributionClient implements ObservationDistributionClient {
+public class AzureObservationDistributionClient implements ObservationDistributionClient, DistributionService {
     private static final Logger log = getLogger(AzureObservationDistributionClient.class);
     private static final int DEFAULT_MAX_SIZE = 1000;
     public static final String CONNECTIONSTRING_KEY = "distribution.azure.connectionString";
@@ -42,6 +43,8 @@ public class AzureObservationDistributionClient implements ObservationDistributi
     private List<ObservationMessage> observedMessages = new LimitedArrayList(DEFAULT_MAX_SIZE);
     private Map<String, ObservationMessage> messagesAwaitingSentAck = new HashMap<>();
     private long numberOfMessagesObserved = 0;
+    private long numberOfMessagesPublished = 0;
+    private long numberOfMessagesFailed = 0;
 
     private final Tracer tracer;
     private final TelemetryClient telemetryClient;
@@ -82,6 +85,11 @@ public class AzureObservationDistributionClient implements ObservationDistributi
 
     public String getName() {
         return "AzureObservationDistributionClient";
+    }
+
+    @Override
+    public void initialize(Properties properties) {
+        log.warn("initialize() not implemented, and might not be needed.");
     }
 
     /**
@@ -134,6 +142,7 @@ public class AzureObservationDistributionClient implements ObservationDistributi
                         dependencyTelemetry.setTarget("IotHubNorway.messom.no");
                         dependencyTelemetry.setType("PC"); //--> Device_Type=PC, need Client_Type=PC
                         //koble denne målingen til en eller annen "parent"
+
                         if (iotHubClientException != null) {
                             dependencyTelemetry.setSuccess(false);
                             childSpan.setStatus(StatusCode.ERROR, iotHubClientException.getMessage());
@@ -141,22 +150,20 @@ public class AzureObservationDistributionClient implements ObservationDistributi
                             childSpan.addEvent("Failed to send message");
                             childSpan.recordException(iotHubClientException);
                             log.error("Error sending message", iotHubClientException);
+                            addMessagesFailed();
                         } else {
                             //telemetryClient.TrackDependency("myDependencyType", "myDependencyCall", "myDependencyData",  startTime, timer.Elapsed, success);
                             log.info("Message sent: {}", sentMessage);
                             childSpan.setStatus(StatusCode.OK, "Message sent");
                             childSpan.setAttribute("http.response.status_code", "200");
                             childSpan.addEvent("Message sent");
+                            addMessagesPublished();
                         }
                         log.debug("Observation - Response from IoT Hub: message Id={}, status={}", msg.getMessageId(), iotHubClientException == null ? OK : iotHubClientException.getStatusCode());
                         messageSent(sentMessage);
                     }
                 });
-                if (numberOfMessagesObserved < Long.MAX_VALUE) {
-                    numberOfMessagesObserved++;
-                } else {
-                    numberOfMessagesObserved = 1;
-                }
+                addMessagesObserved();
                 success = true;
             } catch (JsonProcessingException e) {
                 childSpan.recordException(e);
@@ -175,6 +182,26 @@ public class AzureObservationDistributionClient implements ObservationDistributi
             parentSpan.end();
         }
 
+    }
+
+    @Override
+    public boolean isInitialized() {
+        return true;
+    }
+
+    @Override
+    public boolean isHealthy() {
+        return true;
+    }
+
+    @Override
+    public long getNumberOfMessagesPublished() {
+        return numberOfMessagesPublished;
+    }
+
+    @Override
+    public long getNumberOfMessagesFailed() {
+        return numberOfMessagesFailed;
     }
 
     protected Message buildTelemetryMessage(ObservationMessage observationMessage) throws JsonProcessingException {
@@ -253,6 +280,28 @@ public class AzureObservationDistributionClient implements ObservationDistributi
             ObservationMessage observationMessage = messagesAwaitingSentAck.get(messageId);
             messagesAwaitingSentAck.remove(messageId);
             observedMessages.add(observationMessage);
+        }
+    }
+
+    synchronized void addMessagesObserved() {
+        if (numberOfMessagesObserved < Long.MAX_VALUE) {
+            numberOfMessagesObserved++;
+        } else {
+            numberOfMessagesObserved = 1;
+        }
+    }
+    synchronized void addMessagesPublished() {
+        if (numberOfMessagesPublished < Long.MAX_VALUE) {
+            numberOfMessagesPublished++;
+        } else {
+            numberOfMessagesPublished = 1;
+        }
+    }
+    synchronized void addMessagesFailed() {
+        if (numberOfMessagesFailed < Long.MAX_VALUE) {
+            numberOfMessagesFailed++;
+        } else {
+            numberOfMessagesFailed = 1;
         }
     }
 }
