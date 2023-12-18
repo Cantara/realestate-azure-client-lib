@@ -129,12 +129,16 @@ public class AzureObservationDistributionClient implements ObservationDistributi
 
             try(Scope childScope = childSpan.makeCurrent()) {
 //            try (Scope ignored = span.makeCurrent()) {
+                log.trace("Publishing observationMessage: {}", observationMessage);
                 Message telemetryMessage = buildTelemetryMessage(observationMessage);
+                log.trace("Built AzureMessage from observationMessage: {}", telemetryMessage);
                 String messageId = telemetryMessage.getMessageId();
                 messagesAwaitingSentAck.put(messageId, observationMessage);
+                log.trace("Try to send to Azure IoT Hub: {}", observationMessage);
                 azureDeviceClient.sendEventAsync(telemetryMessage, new MessageSentCallback() {
                     @Override
                     public void onMessageSent(Message sentMessage, IotHubClientException iotHubClientException, Object callbackContext) {
+                        log.trace("Message is sent to Azure IoT Hub: {}, Exception: {}", sentMessage, iotHubClientException);
                         Message msg = (Message) callbackContext;
                         long elapsedTime = System.currentTimeMillis() - startTime;
                         Duration duration = new Duration(elapsedTime);
@@ -144,6 +148,7 @@ public class AzureObservationDistributionClient implements ObservationDistributi
                         //koble denne målingen til en eller annen "parent"
 
                         if (iotHubClientException != null) {
+                            log.debug("Failed to send {} as Message {} to Azure IoT Hub. Exception: {}", observationMessage, sentMessage, iotHubClientException);
                             dependencyTelemetry.setSuccess(false);
                             childSpan.setStatus(StatusCode.ERROR, iotHubClientException.getMessage());
                             childSpan.setAttribute("http.response.status_code", "500");
@@ -153,7 +158,7 @@ public class AzureObservationDistributionClient implements ObservationDistributi
                             addMessagesFailed();
                         } else {
                             //telemetryClient.TrackDependency("myDependencyType", "myDependencyCall", "myDependencyData",  startTime, timer.Elapsed, success);
-                            log.info("Message sent: {}", sentMessage);
+                            log.debug("Message sent: {}", sentMessage);
                             childSpan.setStatus(StatusCode.OK, "Message sent");
                             childSpan.setAttribute("http.response.status_code", "200");
                             childSpan.addEvent("Message sent");
@@ -166,6 +171,7 @@ public class AzureObservationDistributionClient implements ObservationDistributi
                 addMessagesObserved();
                 success = true;
             } catch (JsonProcessingException e) {
+                log.debug("Failed to parse message: {}", observationMessage, e);
                 childSpan.recordException(e);
                 childSpan.setStatus(StatusCode.ERROR, e.getMessage());
                 childSpan.setAttribute("http.response.status_code", "500");
