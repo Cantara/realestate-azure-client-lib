@@ -89,7 +89,7 @@ public class AzureObservationDistributionClient implements ObservationDistributi
 
     @Override
     public void initialize(Properties properties) {
-        log.warn("initialize() not implemented, and might not be needed.");
+        azureDeviceClient.openConnection();
     }
 
     /**
@@ -113,7 +113,7 @@ public class AzureObservationDistributionClient implements ObservationDistributi
             telemetryClient.trackEvent("publishObservationmessage");
             if (!isConnectionEstablished()) {
                 telemetryClient.trackEvent("error-publish-observationmessage-not-connected");
-                throw new RealEstateException("Connection must explicitly be opened before publishing messages.", ExceptionStatusType.RETRY_NOT_POSSIBLE);
+                throw new RealEstateException("Connection to AzureDeviceClient must explicitly be opened before publishing messages.", ExceptionStatusType.RETRY_NOT_POSSIBLE);
             }
             if (observationMessage == null) {
                 telemetryClient.trackEvent("trace-publish-observationmessage-null");
