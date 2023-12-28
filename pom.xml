@@ -29,7 +29,7 @@
     <jackson.version>2.16.1</jackson.version>
     <slf4j.version>1.7.32</slf4j.version>
     <logback.version>1.2.6</logback.version>
-    <slf4j.version>2.0.9</slf4j.version>
+    <slf4j.version>2.0.10</slf4j.version>
     <logback.version>1.4.7</logback.version>
     <mockserver.version>5.15.0</mockserver.version>
   </properties>
