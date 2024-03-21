@@ -138,7 +138,11 @@ public class AzureObservationDistributionClient implements ObservationDistributi
                 azureDeviceClient.sendEventAsync(telemetryMessage, new MessageSentCallback() {
                     @Override
                     public void onMessageSent(Message sentMessage, IotHubClientException iotHubClientException, Object callbackContext) {
-                        log.trace("Message is sent to Azure IoT Hub: {}, Exception: {}", sentMessage, iotHubClientException);
+                        if (iotHubClientException != null) {
+                            log.trace("Received Error when sening message to to Azure IoT Hub: {}, Exception: {}", sentMessage, iotHubClientException);
+                        } else {
+                            log.trace("Message is sent to Azure IoT Hub: {}, Exception: {}", sentMessage, iotHubClientException);
+                        }
                         Message msg = (Message) callbackContext;
                         long elapsedTime = System.currentTimeMillis() - startTime;
                         Duration duration = new Duration(elapsedTime);
