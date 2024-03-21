@@ -10,6 +10,7 @@ import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.semconv.trace.attributes.SemanticAttributes;
 import org.slf4j.Logger;
 
+import static no.cantara.realestate.azure.metrics.MetricsConfig.INSTRUMENTATION_SCOPE_NAME;
 import static org.slf4j.LoggerFactory.getLogger;
 
 public class AzureDeviceClient {
@@ -28,7 +29,7 @@ public class AzureDeviceClient {
         if (deviceClient != null && deviceClient.getConfig() != null) {
             iotHubHostname = deviceClient.getConfig().getIotHubHostname();
         }
-        tracer = GlobalOpenTelemetry.getTracer("no.cantara.realestate");
+        tracer = GlobalOpenTelemetry.getTracer(INSTRUMENTATION_SCOPE_NAME);
     }
 
     /*
@@ -39,7 +40,7 @@ public class AzureDeviceClient {
         if (deviceClient != null && deviceClient.getConfig() != null) {
             iotHubHostname = deviceClient.getConfig().getIotHubHostname();
         }
-        tracer = GlobalOpenTelemetry.getTracer("no.cantara.realestate");
+        tracer = GlobalOpenTelemetry.getTracer(INSTRUMENTATION_SCOPE_NAME);
     }
 
     public void openConnection() {
