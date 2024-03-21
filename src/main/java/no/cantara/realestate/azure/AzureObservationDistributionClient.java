@@ -141,7 +141,7 @@ public class AzureObservationDistributionClient implements ObservationDistributi
                         if (iotHubClientException != null) {
                             log.trace("Received Error when sening message to to Azure IoT Hub: {}, Exception: {}", sentMessage, iotHubClientException);
                         } else {
-                            log.trace("Message is sent to Azure IoT Hub: {}, Exception: {}", sentMessage, iotHubClientException);
+                            log.trace("Message is sent to Azure IoT Hub: {}", sentMessage);
                         }
                         Message msg = (Message) callbackContext;
                         long elapsedTime = System.currentTimeMillis() - startTime;
