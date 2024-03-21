@@ -131,7 +131,7 @@ public class AzureObservationDistributionClient implements ObservationDistributi
 //            try (Scope ignored = span.makeCurrent()) {
                 log.trace("Publishing observationMessage: {}", observationMessage);
                 Message telemetryMessage = buildTelemetryMessage(observationMessage);
-                log.trace("Built AzureMessage from observationMessage: {}", telemetryMessage);
+                log.trace("Built AzureMessage from observationMessage: {}, with body: {}", telemetryMessage, telemetryMessage.getBytes());
                 String messageId = telemetryMessage.getMessageId();
                 messagesAwaitingSentAck.put(messageId, observationMessage);
                 log.trace("Try to send to Azure IoT Hub: {}", observationMessage);
