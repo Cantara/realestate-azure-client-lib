@@ -49,7 +49,7 @@
       <groupId>no.cantara.config</groupId>
       <artifactId>property-config</artifactId>
       <version>0.8.33</version>
-      <scope>test,provided</scope>
+      <scope>provided</scope>
     </dependency>
 
     <!-- Azure -->

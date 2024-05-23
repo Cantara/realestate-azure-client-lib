@@ -12,7 +12,7 @@ class AzureDigitalTwinClientManualTest {
         AzureDigitalTwinClient client = new AzureDigitalTwinClient(config);
         List<BasicDigitalTwin> twins = client.queryForTwins("SELECT T.$dtId, T.identifiers.metasys_id FROM digitaltwins T WHERE contains(T.customProperties.source.System, 'Metasys')");
         for (BasicDigitalTwin twin : twins) {
-            System.out.println("twin = " + twin);
+            System.out.println("twin = " + twin.getContents());
         }
     }
 }
