@@ -69,7 +69,13 @@ public class AzureTableClient {
     }
 
     public boolean hasRow(String partitionKey, String rowKey) {
-        return tableClient.getEntity(partitionKey, rowKey) != null;
+        boolean hasRow = false;
+        try {
+            hasRow = tableClient.getEntity(partitionKey, rowKey) != null;
+        } catch (Exception e) {
+            log.debug("Could not find row with partitionKey {} and rowKey {}. This might be as expected. Root error:", partitionKey, rowKey, e);
+        }
+        return hasRow;
     }
 
     public void createEntity(String partitionKey, String rowKey, Map<String, Object> properties) throws RealEstateException {
