@@ -68,6 +68,27 @@ public class AzureTableClient {
         return stringRows;
     }
 
+    public boolean hasRow(String partitionKey, String rowKey) {
+        return tableClient.getEntity(partitionKey, rowKey) != null;
+    }
+
+    public void createEntity(String partitionKey, String rowKey, Map<String, Object> properties) throws RealEstateException {
+        try {
+            TableEntity tableEntity = new TableEntity(partitionKey, rowKey);
+            properties.forEach((key, value) -> {
+                if (value instanceof Instant) {
+                    value = ((Instant) value).truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toString();
+                }
+                tableEntity.addProperty(key, value);
+            });
+            tableClient.createEntity(tableEntity);
+        } catch (Exception e) {
+            RealEstateException realEstateException = new RealEstateException("Could not create entity with partitionKey " + partitionKey + " and rowKey " + rowKey + ", properties " + properties, e);
+            log.trace(realEstateException.getMessage(), realEstateException);
+            throw e;
+        }
+    }
+
     /**
      *
      * @param partitionKey
