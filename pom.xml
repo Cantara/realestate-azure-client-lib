@@ -107,7 +107,7 @@
     <dependency>
       <groupId>com.microsoft.azure</groupId>
       <artifactId>applicationinsights-core</artifactId>
-      <version>3.5.4</version>
+      <version>3.6.1</version>
     </dependency>
 
     <dependency>
