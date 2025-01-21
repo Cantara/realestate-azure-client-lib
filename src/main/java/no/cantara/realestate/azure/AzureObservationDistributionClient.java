@@ -27,6 +27,7 @@ import no.cantara.realestate.utils.LimitedArrayList;
 import org.slf4j.Logger;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.*;
 
 import static com.microsoft.azure.sdk.iot.device.IotHubStatusCode.OK;
@@ -48,6 +49,7 @@ public class AzureObservationDistributionClient implements ObservationDistributi
 
     private final Tracer tracer;
     private final TelemetryClient telemetryClient;
+    private Instant whenLastMessageDistributedAt = null;
 
     /*
     Intended used for testing.
@@ -290,6 +292,7 @@ public class AzureObservationDistributionClient implements ObservationDistributi
             ObservationMessage observationMessage = messagesAwaitingSentAck.get(messageId);
             messagesAwaitingSentAck.remove(messageId);
             observedMessages.add(observationMessage);
+            updateWhenLastObservationDistributed();
         }
     }
 
@@ -313,5 +316,19 @@ public class AzureObservationDistributionClient implements ObservationDistributi
         } else {
             numberOfMessagesFailed = 1;
         }
+    }
+
+    @Override
+    public long getNumberOfMessagesInQueue() {
+        return messagesAwaitingSentAck.size();
+    }
+
+    protected synchronized void updateWhenLastObservationDistributed() {
+        whenLastMessageDistributedAt = Instant.ofEpochMilli(System.currentTimeMillis());
+    }
+
+    @Override
+    public Instant getWhenLastMessageDistributed() {
+        return whenLastMessageDistributedAt;
     }
 }

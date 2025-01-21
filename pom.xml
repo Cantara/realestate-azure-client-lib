@@ -83,6 +83,12 @@
       <artifactId>azure-data-tables</artifactId>
       <version>12.5.0</version>
     </dependency>
+    <dependency>
+      <groupId>com.azure</groupId>
+      <artifactId>azure-storage-blob</artifactId>
+      <version>12.27.0</version>
+    </dependency>
+
 
     <!-- METRICS -->
     <dependency>
