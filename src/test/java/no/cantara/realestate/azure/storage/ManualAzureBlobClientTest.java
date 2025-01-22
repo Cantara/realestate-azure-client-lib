@@ -5,6 +5,7 @@ import no.cantara.realestate.azure.CantaraRealestateAzureException;
 import org.slf4j.Logger;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.slf4j.LoggerFactory.getLogger;
@@ -13,11 +14,48 @@ class ManualAzureBlobClientTest {
     private static final Logger log = getLogger(ManualAzureBlobClientTest.class);
 
     private AzureBlobClient azureBlobClient;
+    private static String containerName = "metasyscrawler";
 
     public static void main(String[] args) {
         boolean useConfig = true;
-        String connectionString = null;
+        String connectionString = getConnectionString(args, useConfig);
+        String fileName = "test1234.json";
 
+        try {
+            AzureBlobClient azureBlobClient = new AzureBlobClient(connectionString, containerName);
+            //writeFileToAzure(azureBlobClient, fileName);
+            List<String> filenames = findFilesByTag(azureBlobClient, "parentId", "parent1234");
+            fileName = filenames.get(0);
+            readFileFromAzure(azureBlobClient, fileName);
+        } catch (CantaraRealestateAzureException e) {
+            log.error("Failed write file to containerName: {}", containerName, e);
+        } catch (Exception e) {
+            CantaraRealestateAzureException cantaraRealestateAzureException = new CantaraRealestateAzureException("Failed to write blob to containerName: " + containerName, e);
+            log.error(cantaraRealestateAzureException.getMessage());
+        } finally {
+            log.info("Done");
+        }
+
+    }
+
+    private static void writeFileToAzure(AzureBlobClient azureBlobClient, String fileName) {
+        Map<String, String> tags = new HashMap<>();
+        tags.put("test", "true");
+        Boolean overwrite = true;
+        log.debug("Length of longJson: {}", longJson.length());
+        azureBlobClient.writeBlobWithTags(fileName, longJson, tags, overwrite);
+    }
+    private static void readFileFromAzure(AzureBlobClient azureBlobClient, String fileName) {
+        String jsonContent = azureBlobClient.readBlob(fileName);
+        log.debug("jsonContent: {}", jsonContent);
+        System.out.println(jsonContent);
+    }
+    private static List<String> findFilesByTag(AzureBlobClient azureBlobClient, String tagKey, String tagValue) {
+        return azureBlobClient.findBlobsByTags(tagKey, tagValue);
+    }
+
+    private static String getConnectionString(String[] args, boolean useConfig) {
+        String connectionString;
         if (useConfig) {
             ApplicationProperties config = ApplicationProperties.builder().defaults().buildAndSetStaticSingleton();
             connectionString = config.get(AzureStorageTablesClient.CONNECTIONSTRING_KEY);
@@ -32,23 +70,7 @@ class ManualAzureBlobClientTest {
             connectionString = args[0];
             log.debug("ConnectionString from commandLine {}", connectionString);
         }
-        String containerName = "metasyscrawler";
-        try {
-            AzureBlobClient azureBlobClient = new AzureBlobClient(connectionString, containerName);
-            Map<String, String> tags = new HashMap<>();
-            tags.put("test", "true");
-            Boolean overwrite = true;
-            log.debug("Length of longJson: {}", longJson.length());
-            azureBlobClient.writeBlobWithTags("test-3.json", longJson, tags, overwrite);
-        } catch (CantaraRealestateAzureException e) {
-            log.error("Failed write file to containerName: {}", containerName, e);
-        } catch (Exception e) {
-            CantaraRealestateAzureException cantaraRealestateAzureException = new CantaraRealestateAzureException("Failed to write blob to containerName: " + containerName, e);
-            log.error(cantaraRealestateAzureException.getMessage());
-        } finally {
-            log.info("Done");
-        }
-
+        return connectionString;
     }
 
     private static String longJson = """

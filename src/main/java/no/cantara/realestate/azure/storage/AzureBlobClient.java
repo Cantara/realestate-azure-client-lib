@@ -7,6 +7,7 @@ import com.azure.storage.blob.BlobContainerClientBuilder;
 import com.azure.storage.blob.models.AccessTier;
 import com.azure.storage.blob.models.BlobHttpHeaders;
 import com.azure.storage.blob.models.BlobStorageException;
+import com.azure.storage.blob.models.TaggedBlobItem;
 import com.azure.storage.blob.options.BlockBlobSimpleUploadOptions;
 import com.azure.storage.blob.specialized.BlockBlobClient;
 import no.cantara.realestate.azure.CantaraRealestateAzureException;
@@ -16,7 +17,7 @@ import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.Map;
+import java.util.*;
 
 import static org.slf4j.LoggerFactory.getLogger;
 
@@ -99,5 +100,43 @@ public class AzureBlobClient {
             return false;
         }
 
+    }
+    //Read blob from container
+    public String readBlob(String blobName) {
+        try {
+            BlobClient blobClient = blobContainerClient.getBlobClient(blobName);
+            return blobClient.downloadContent().toString();
+        } catch (Exception e) {
+            log.error("Failed to read blob: {} from containerName {}", blobName, containerName, e);
+            return null;
+        }
+    }
+
+    public List<String> findBlobsByTags(String tagKey, String tagValue) {
+        List<String> blobNames = new ArrayList<>();
+        try {
+            String query = String.format("\"%s\" = '%s'", tagKey, tagValue);
+            Iterable<TaggedBlobItem> blobs = blobContainerClient.findBlobsByTags(query);
+            for (TaggedBlobItem blob : blobs) {
+                blobNames.add(blob.getName());
+            }
+        } catch (Exception e) {
+            log.error("Failed to find blobs by tags: {}={}", tagKey, tagValue, e);
+        }
+        return blobNames;
+    }
+
+    public Set<String> findAllTagNames() {
+        Set<String> uniqueTagNames = new HashSet<>();
+        try {
+            Iterable<TaggedBlobItem> blobs = blobContainerClient.findBlobsByTags("1=1"); // Query to get all blobs
+            for (TaggedBlobItem blob : blobs) {
+                Map<String, String> tags = blob.getTags();
+                uniqueTagNames.addAll(tags.keySet());
+            }
+        } catch (Exception e) {
+            log.error("Failed to find all unique tag names", e);
+        }
+        return uniqueTagNames;
     }
 }
