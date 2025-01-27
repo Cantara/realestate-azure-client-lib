@@ -28,10 +28,10 @@ class ManualAzureBlobClientTest {
             fileName = filenames.get(0);
             readFileFromAzure(azureBlobClient, fileName);
         } catch (CantaraRealestateAzureException e) {
-            log.error("Failed write file to containerName: {}", containerName, e);
+            log.info("Failed write file to containerName: {}", containerName, e);
         } catch (Exception e) {
             CantaraRealestateAzureException cantaraRealestateAzureException = new CantaraRealestateAzureException("Failed to write blob to containerName: " + containerName, e);
-            log.error(cantaraRealestateAzureException.getMessage());
+            log.info(cantaraRealestateAzureException.getMessage());
         } finally {
             log.info("Done");
         }

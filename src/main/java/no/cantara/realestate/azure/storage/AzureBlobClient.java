@@ -69,10 +69,10 @@ public class AzureBlobClient {
                 throw new CantaraRealestateAzureException("Blob container" + containerName + " does not exist");
             }
         } catch (BlobStorageException e) {
-            log.error("Blob container {} does not exist", containerName, e);
+            log.info("Blob container {} does not exist", containerName, e);
             throw new CantaraRealestateAzureException("Blob container does not exist", e);
         } catch (Exception e) {
-            log.error("Failed to write blob: {} to containerName {}", blobName, containerName, e);
+            log.info("Failed to write blob: {} to containerName {}", blobName, containerName, e);
             return false;
         }
     }
@@ -96,7 +96,7 @@ public class AzureBlobClient {
             String logContent = jsonContent;
             if (logContent.length() > 100)
                 logContent = jsonContent.substring(0,100) + "...truncated";
-            log.error("Failed to write blob {}, with content {} and tags {}", blobName, logContent, tags,e);
+            log.info("Failed to write blob {}, with content {} and tags {}", blobName, logContent, tags,e);
             return false;
         }
 
@@ -107,7 +107,7 @@ public class AzureBlobClient {
             BlobClient blobClient = blobContainerClient.getBlobClient(blobName);
             return blobClient.downloadContent().toString();
         } catch (Exception e) {
-            log.error("Failed to read blob: {} from containerName {}", blobName, containerName, e);
+            log.info("Failed to read blob: {} from containerName {}", blobName, containerName, e);
             return null;
         }
     }
@@ -121,7 +121,7 @@ public class AzureBlobClient {
                 blobNames.add(blob.getName());
             }
         } catch (Exception e) {
-            log.error("Failed to find blobs by tags: {}={}", tagKey, tagValue, e);
+            log.info("Failed to find blobs by tags: {}={}", tagKey, tagValue, e);
         }
         return blobNames;
     }
@@ -135,7 +135,7 @@ public class AzureBlobClient {
                 uniqueTagNames.addAll(tags.keySet());
             }
         } catch (Exception e) {
-            log.error("Failed to find all unique tag names", e);
+            log.info("Failed to find all unique tag names", e);
         }
         return uniqueTagNames;
     }
