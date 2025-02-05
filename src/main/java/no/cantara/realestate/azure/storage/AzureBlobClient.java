@@ -1,5 +1,6 @@
 package no.cantara.realestate.azure.storage;
 
+import com.azure.core.util.BinaryData;
 import com.azure.core.util.Context;
 import com.azure.storage.blob.BlobClient;
 import com.azure.storage.blob.BlobContainerClient;
@@ -138,5 +139,31 @@ public class AzureBlobClient {
             log.info("Failed to find all unique tag names", e);
         }
         return uniqueTagNames;
+    }
+
+    public Set<String> findAllBlobNames() {
+        Set<String> blobNames = new HashSet<>();
+        try {
+            blobContainerClient.listBlobs().forEach(blobItem -> blobNames.add(blobItem.getName()));
+        } catch (Exception e) {
+            log.info("Failed to find all blob names", e);
+        }
+        return blobNames;
+    }
+
+    public String getBlobContentAsString(String blobName) {
+        String content = null;
+        try {
+            BlobClient blobClient = blobContainerClient.getBlobClient(blobName);
+            BinaryData data = blobClient.downloadContent();
+            log.debug("Found blob with name: {}", blobName);
+            if (data != null) {
+                log.debug("Blob {} has content", blobName);
+                content = data.toString();
+            }
+        } catch (Exception e) {
+            log.info("Failed to get blob by name: {}", blobName, e);
+        }
+        return content;
     }
 }
