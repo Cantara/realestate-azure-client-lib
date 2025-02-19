@@ -56,7 +56,7 @@
     <dependency>
       <groupId>com.azure</groupId>
       <artifactId>azure-core</artifactId>
-      <version>1.55.0</version>
+      <version>1.55.1</version>
     </dependency>
     <dependency>
       <groupId>com.azure</groupId>
@@ -66,7 +66,7 @@
     <dependency>
       <groupId>com.azure</groupId>
       <artifactId>azure-identity</artifactId>
-      <version>1.15.1</version>
+      <version>1.15.2</version>
     </dependency>
     <dependency>
       <groupId>com.microsoft.azure.sdk.iot</groupId>
@@ -81,7 +81,7 @@
     <dependency>
       <groupId>com.azure</groupId>
       <artifactId>azure-data-tables</artifactId>
-      <version>12.5.0</version>
+      <version>12.5.1</version>
     </dependency>
     <dependency>
       <groupId>com.azure</groupId>
