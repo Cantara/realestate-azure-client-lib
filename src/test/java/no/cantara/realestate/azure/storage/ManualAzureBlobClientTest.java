@@ -4,9 +4,12 @@ import no.cantara.config.ApplicationProperties;
 import no.cantara.realestate.azure.CantaraRealestateAzureException;
 import org.slf4j.Logger;
 
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.slf4j.LoggerFactory.getLogger;
 
@@ -24,9 +27,10 @@ class ManualAzureBlobClientTest {
         try {
             AzureBlobClient azureBlobClient = new AzureBlobClient(connectionString, containerName);
             //writeFileToAzure(azureBlobClient, fileName);
-            List<String> filenames = findFilesByTag(azureBlobClient, "parentId", "parent1234");
-            fileName = filenames.get(0);
-            readFileFromAzure(azureBlobClient, fileName);
+//            List<String> filenames = findFilesByTag(azureBlobClient, "parentId", "parent1234");
+//            fileName = filenames.get(0);
+//            readFileFromAzure(azureBlobClient, fileName);
+            listBlobsUpdatedToday(azureBlobClient);
         } catch (CantaraRealestateAzureException e) {
             log.info("Failed write file to containerName: {}", containerName, e);
         } catch (Exception e) {
@@ -36,6 +40,15 @@ class ManualAzureBlobClientTest {
             log.info("Done");
         }
 
+    }
+    private static void listBlobsUpdatedToday(AzureBlobClient azureBlobClient) {
+        Instant now = Instant.now();
+        Instant from = now.truncatedTo(ChronoUnit.DAYS);
+        Set<String> blobNames = azureBlobClient.findBlobsUpdatedByDate(from, now);
+        for (String blobName : blobNames) {
+            log.debug("blobName: {}", blobName);
+            System.out.println(blobName);
+        }
     }
 
     private static void writeFileToAzure(AzureBlobClient azureBlobClient, String fileName) {

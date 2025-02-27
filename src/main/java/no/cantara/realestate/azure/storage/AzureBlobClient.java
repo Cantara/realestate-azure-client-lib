@@ -18,6 +18,7 @@ import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.*;
 
 import static org.slf4j.LoggerFactory.getLogger;
@@ -147,6 +148,22 @@ public class AzureBlobClient {
             blobContainerClient.listBlobs().forEach(blobItem -> blobNames.add(blobItem.getName()));
         } catch (Exception e) {
             log.info("Failed to find all blob names", e);
+        }
+        return blobNames;
+    }
+
+    public Set<String> findBlobsUpdatedByDate(Instant fromDate, Instant toDate) {
+        Set<String> blobNames = new HashSet<>();
+        try {
+            blobContainerClient.listBlobs().forEach(blobItem -> {
+                Instant lastModified = blobItem.getProperties().getLastModified().toInstant();
+                if ((lastModified.isAfter(fromDate) || lastModified.equals(fromDate)) &&
+                        (lastModified.isBefore(toDate) || lastModified.equals(toDate))) {
+                    blobNames.add(blobItem.getName());
+                }
+            });
+        } catch (Exception e) {
+            log.info("Failed to find blobs updated between {} and {}", fromDate, toDate, e);
         }
         return blobNames;
     }
