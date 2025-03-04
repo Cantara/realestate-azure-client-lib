@@ -61,7 +61,7 @@
     <dependency>
       <groupId>com.azure</groupId>
       <artifactId>azure-digitaltwins-core</artifactId>
-      <version>1.4.0</version>
+      <version>1.4.1</version>
     </dependency>
     <dependency>
       <groupId>com.azure</groupId>
@@ -86,7 +86,7 @@
     <dependency>
       <groupId>com.azure</groupId>
       <artifactId>azure-storage-blob</artifactId>
-      <version>12.29.0</version>
+      <version>12.29.1</version>
     </dependency>
 
 
