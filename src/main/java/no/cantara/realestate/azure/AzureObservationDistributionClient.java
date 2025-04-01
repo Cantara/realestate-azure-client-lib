@@ -107,7 +107,7 @@ public class AzureObservationDistributionClient implements ObservationDistributi
     @Override
     public void publish(ObservationMessage observationMessage) {
         long startTime = System.currentTimeMillis();
-        log.info("Tracer: {}", tracer);
+//        log.info("Tracer: {}", tracer);
         Span parentSpan = tracer.spanBuilder("IotHub").startSpan();
         try (Scope scope = parentSpan.makeCurrent()) {
 //        Span span = tracer.spanBuilder("publishObservationmessage").setSpanKind(SpanKind.CLIENT).startSpan();
