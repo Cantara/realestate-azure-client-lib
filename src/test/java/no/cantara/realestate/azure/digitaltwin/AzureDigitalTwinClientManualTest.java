@@ -10,9 +10,12 @@ class AzureDigitalTwinClientManualTest {
     public static void main(String[] args) {
         ApplicationProperties config = ApplicationProperties.builder().defaults().buildAndSetStaticSingleton();
         AzureDigitalTwinClient client = new AzureDigitalTwinClient(config);
-        List<BasicDigitalTwin> twins = client.queryForTwins("SELECT T.$dtId, T.identifiers.metasys_id FROM digitaltwins T WHERE contains(T.customProperties.source.System, 'Metasys')");
+        String sourceSystem = "Desigo";
+        String query = "SELECT * FROM digitaltwins T WHERE is_of_model ('dtmi:org:brickschema:schema:Brick:Sensor;1') and contains(customProperties.source.System,'%s')".formatted(sourceSystem);
+        List<BasicDigitalTwin> twins = client.queryForTwins(query);
+        System.out.println("Found " + twins.size() + " twins with source system: " + sourceSystem);
         for (BasicDigitalTwin twin : twins) {
-            System.out.println("twin = " + twin.getContents());
+            System.out.println("twin = " + twin.getId());
         }
     }
 }
