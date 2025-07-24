@@ -1,11 +1,13 @@
 package no.cantara.realestate.azure.digitaltwin;
 
+import com.azure.core.exception.HttpResponseException;
 import com.azure.digitaltwins.core.BasicDigitalTwin;
 import com.azure.digitaltwins.core.DigitalTwinsClient;
 import com.azure.digitaltwins.core.DigitalTwinsClientBuilder;
 import com.azure.identity.ClientSecretCredential;
 import com.azure.identity.ClientSecretCredentialBuilder;
 import no.cantara.config.ApplicationProperties;
+import no.cantara.realestate.azure.RealestateNotAuthorized;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -52,10 +54,17 @@ public class AzureDigitalTwinClient {
                 .buildClient();
     }
 
-    public List<BasicDigitalTwin> queryForTwins(String query) {
-        return client.query(query, BasicDigitalTwin.class)
-                .stream()
-                .collect(Collectors.toList());
+    public List<BasicDigitalTwin> queryForTwins(String query) throws RealestateNotAuthorized {
+        try {
+            return client.query(query, BasicDigitalTwin.class)
+                    .stream()
+                    .collect(Collectors.toList());
+        } catch (HttpResponseException e) {
+            if (e.getResponse().getStatusCode() == 403) {
+                throw new RealestateNotAuthorized("Not authorized to access Azure Digital Twins. Please check your credentials and permissions.", e);
+            }
+            throw e;
+        }
     }
 
 
