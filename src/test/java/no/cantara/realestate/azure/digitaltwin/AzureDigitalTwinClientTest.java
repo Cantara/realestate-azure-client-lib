@@ -5,7 +5,7 @@ import com.azure.core.http.HttpRequest;
 import com.azure.core.http.HttpResponse;
 import com.azure.digitaltwins.core.BasicDigitalTwin;
 import com.azure.digitaltwins.core.DigitalTwinsClient;
-import no.cantara.realestate.azure.RealestateNotAuthorized;
+import no.cantara.realestate.azure.RealestateNotAuthorizedException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
@@ -36,7 +36,7 @@ class AzureDigitalTwinClientTest {
     }
 
     @Test
-    void queryForTwins_shouldThrowRealestateNotAuthorized_when403StatusCode() {
+    void queryForTwins_shouldThrowRealestateNotAuthorizedException_when403StatusCode() {
         // Arrange
         String query = "SELECT * FROM digitaltwins";
         when(mockResponse.getStatusCode()).thenReturn(403);
@@ -48,7 +48,7 @@ class AzureDigitalTwinClientTest {
                 .thenThrow(httpResponseException);
 
         // Act & Assert
-        RealestateNotAuthorized exception = assertThrows(RealestateNotAuthorized.class, 
+        RealestateNotAuthorizedException exception = assertThrows(RealestateNotAuthorizedException.class, 
                 () -> azureDigitalTwinClient.queryForTwins(query));
         
         assertEquals("Not authorized to access Azure Digital Twins. Please check your credentials and permissions.", 
