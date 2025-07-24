@@ -41,7 +41,8 @@ class AzureDigitalTwinClientTest {
         String query = "SELECT * FROM digitaltwins";
         when(mockResponse.getStatusCode()).thenReturn(403);
         when(mockRequest.getUrl()).thenReturn(null);
-        HttpResponseException httpResponseException = new HttpResponseException("Forbidden", mockResponse, mockRequest);
+        // Simulate the exact exception from the stack trace: Status code 403, (empty body)
+        HttpResponseException httpResponseException = new HttpResponseException("Status code 403, (empty body)", mockResponse, mockRequest);
         
         when(mockClient.query(eq(query), eq(BasicDigitalTwin.class)))
                 .thenThrow(httpResponseException);
