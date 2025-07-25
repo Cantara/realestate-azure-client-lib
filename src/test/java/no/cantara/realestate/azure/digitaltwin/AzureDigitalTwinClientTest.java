@@ -5,16 +5,17 @@ import com.azure.core.http.HttpRequest;
 import com.azure.core.http.HttpResponse;
 import com.azure.digitaltwins.core.BasicDigitalTwin;
 import com.azure.digitaltwins.core.DigitalTwinsClient;
-import no.cantara.realestate.azure.RealestateNotAuthorized;
+import no.cantara.realestate.ApiUnavailableException;
+import no.cantara.realestate.ExceptionStatusType;
+import no.cantara.realestate.security.NotAuthorizedException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.when;
 
 class AzureDigitalTwinClientTest {
 
@@ -36,7 +37,7 @@ class AzureDigitalTwinClientTest {
     }
 
     @Test
-    void queryForTwins_shouldThrowRealestateNotAuthorized_when403StatusCode() {
+    void queryForTwinsNotAuthorized() {
         // Arrange
         String query = "SELECT * FROM digitaltwins";
         when(mockResponse.getStatusCode()).thenReturn(403);
@@ -48,16 +49,15 @@ class AzureDigitalTwinClientTest {
                 .thenThrow(httpResponseException);
 
         // Act & Assert
-        RealestateNotAuthorized exception = assertThrows(RealestateNotAuthorized.class, 
+        NotAuthorizedException exception = assertThrows(NotAuthorizedException.class,
                 () -> azureDigitalTwinClient.queryForTwins(query));
         
-        assertEquals("Not authorized to access Azure Digital Twins. Please check your credentials and permissions.", 
-                exception.getMessage().split(" :MessageId:")[0]);
-        assertEquals(httpResponseException, exception.getCause());
+        assertTrue(exception.getMessage().contains("Not authorized to access Azure Digital Twins."));
+        assertEquals(null, exception.getUserId()); // Application ID is not set in this test
     }
 
     @Test
-    void queryForTwins_shouldRethrowOtherHttpResponseExceptions_whenNot403StatusCode() {
+    void queryForTwinsApiNotAvailable() {
         // Arrange
         String query = "SELECT * FROM digitaltwins";
         when(mockResponse.getStatusCode()).thenReturn(500);
@@ -68,9 +68,10 @@ class AzureDigitalTwinClientTest {
                 .thenThrow(httpResponseException);
 
         // Act & Assert
-        HttpResponseException exception = assertThrows(HttpResponseException.class, 
+        ApiUnavailableException exception = assertThrows(ApiUnavailableException.class,
                 () -> azureDigitalTwinClient.queryForTwins(query));
         
-        assertEquals(httpResponseException, exception);
+        assertEquals(httpResponseException, exception.getCause());
+        assertEquals(ExceptionStatusType.RETRY_MAY_FIX_ISSUE, exception.getStatusType());
     }
 }

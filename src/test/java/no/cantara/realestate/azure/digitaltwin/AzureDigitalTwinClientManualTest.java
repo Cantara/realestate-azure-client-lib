@@ -2,7 +2,7 @@ package no.cantara.realestate.azure.digitaltwin;
 
 import com.azure.digitaltwins.core.BasicDigitalTwin;
 import no.cantara.config.ApplicationProperties;
-import no.cantara.realestate.azure.RealestateNotAuthorized;
+import no.cantara.realestate.security.NotAuthorizedException;
 
 import java.util.List;
 
@@ -19,7 +19,7 @@ class AzureDigitalTwinClientManualTest {
             for (BasicDigitalTwin twin : twins) {
                 System.out.println("twin = " + twin.getId());
             }
-        } catch (RealestateNotAuthorized e) {
+        } catch (NotAuthorizedException e) {
             System.err.println("Authorization error: " + e.getMessage());
         }
     }
