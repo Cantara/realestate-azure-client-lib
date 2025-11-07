@@ -54,10 +54,20 @@ public class AzureObservationDistributionClient implements ObservationDistributi
     /*
     Intended used for testing.
      */
-    protected AzureObservationDistributionClient(AzureDeviceClient azureDeviceClient) {
+    public AzureObservationDistributionClient(AzureDeviceClient azureDeviceClient) {
         tracer = GlobalOpenTelemetry.getTracer("OTEL.AzureMonitor.AzureObservationDistributionClient");
         telemetryClient = new TelemetryClient();
         this.azureDeviceClient = azureDeviceClient;
+        objectMapper = RealEstateObjectMapper.getInstance();
+    }
+
+    /*
+    Intended used for test client
+     */
+    public AzureObservationDistributionClient(AzureDeviceClient azureDeviceClient, String connectionString) {
+        tracer = GlobalOpenTelemetry.getTracer("OTEL.AzureMonitor.AzureObservationDistributionClient");
+        telemetryClient = new TelemetryClient();
+        this.azureDeviceClient = azureDeviceClient != null ? azureDeviceClient : new AzureDeviceClient(connectionString);
         objectMapper = RealEstateObjectMapper.getInstance();
     }
 
@@ -106,6 +116,14 @@ public class AzureObservationDistributionClient implements ObservationDistributi
     }
     @Override
     public void publish(ObservationMessage observationMessage) {
+        if (!isConnectionEstablished()) {
+            log.warn("Connection not established, message will be queued/dropped");
+            telemetryClient.trackEvent("error-publish-observationmessage-not-connected");
+            throw new RealEstateException(
+                    "Connection to AzureDeviceClient is not established",
+                    ExceptionStatusType.RETRY_MAY_FIX_ISSUE  // ✅ RETRY_POSSIBLE i stedet!
+            );
+        }
         long startTime = System.currentTimeMillis();
 //        log.info("Tracer: {}", tracer);
         Span parentSpan = tracer.spanBuilder("IotHub").startSpan();

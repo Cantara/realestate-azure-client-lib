@@ -101,7 +101,26 @@ public class AzureBlobClient {
             log.info("Failed to write blob {}, with content {} and tags {}", blobName, logContent, tags,e);
             return false;
         }
+    }
+    public boolean writeZipBlobWithTags(String blobName, byte[] zipContent, Map<String, String> tags, Boolean overwrite) {
+        try {
+            InputStream dataStream = new ByteArrayInputStream(zipContent);
 
+            BlobClient blobClient = blobContainerClient.getBlobClient(blobName);
+            blobClient.upload(dataStream, zipContent.length, overwrite);
+
+            BlobHttpHeaders headers = new BlobHttpHeaders();
+            headers.setContentType("application/zip");
+            headers.setContentEncoding("base64");
+            blobClient.setHttpHeaders(headers);
+            blobClient.setTags(tags);
+
+            dataStream.close();
+            return true;
+        } catch (Exception e) {
+            log.info("Failed to write zip blob: {} to containerName {}", blobName, containerName, e);
+            return false;
+        }
     }
     //Read blob from container
     public String readBlob(String blobName) {
