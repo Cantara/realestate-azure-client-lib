@@ -133,6 +133,16 @@ public class AzureBlobClient {
         }
     }
 
+    public byte[] readBlobBytes(String blobName) {
+        try {
+            BlobClient blobClient = blobContainerClient.getBlobClient(blobName);
+            return blobClient.downloadContent().toBytes();
+        } catch (Exception e) {
+            log.info("Failed to read blob: {} from containerName {}", blobName, containerName, e);
+            return null;
+        }
+    }
+
     public List<String> findBlobsByTags(String tagKey, String tagValue) {
         List<String> blobNames = new ArrayList<>();
         try {
