@@ -8,6 +8,11 @@ import com.microsoft.azure.kusto.data.exceptions.ThrottleException;
 import no.cantara.config.ApplicationProperties;
 import org.slf4j.Logger;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
 import static org.slf4j.LoggerFactory.getLogger;
 
 public class AzureDataExplorerClient {
@@ -49,16 +54,10 @@ public class AzureDataExplorerClient {
         try {
             KustoOperationResult response = kustoClient.executeQuery(database, query);
             primaryResults = response.getPrimaryResults();
-            while (primaryResults.next()) {
-                KustoResultColumn[] columns = primaryResults.getColumns();
-                for (KustoResultColumn column : columns) {
-                    log.debug(column.getColumnName() + ": " + primaryResults.getString(column.getColumnName()) + ", ");
-                }
-            }
         } catch (ThrottleException e) {
             log.warn("Throttled. Waiting 10 seconds before retrying", e);
             try {
-                Thread.sleep(10000);
+                Thread.sleep(1000);
                 log.info("Try to re-run query: {}", query);
                 runQuery(query);
             } catch (InterruptedException ex) {
@@ -98,6 +97,30 @@ public class AzureDataExplorerClient {
             throw new RuntimeException(e);
         }
         return primaryResults;
+    }
+
+    /**
+     * Executes a query and returns results as a list of maps.
+     * Each map represents a row with column names as keys.
+     *
+     * @param primaryResults
+     * @return list of rows, where each row is a map of column name to value
+     */
+    public List<Map<String, Object>> mapToList(KustoResultSetTable primaryResults) {
+        List<Map<String, Object>> mappedList = new ArrayList<>();
+        try {
+            KustoResultColumn[] columns = primaryResults.getColumns();
+            while (primaryResults.next()) {
+                Map<String, Object> row = new LinkedHashMap<>();
+                for (KustoResultColumn column : columns) {
+                    row.put(column.getColumnName(), primaryResults.getObject(column.getColumnName()));
+                }
+                mappedList.add(row);
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("Error mapping results to list", e);
+        }
+        return mappedList;
     }
 
 
@@ -143,14 +166,6 @@ public class AzureDataExplorerClient {
                     }
                     sb.append("\n");
                 }
-            } else if (result.getColumns().length > 0) {
-                KustoResultColumn[] columns = result.getColumns();
-                for (KustoResultColumn column : columns) {
-                    sb.append(column.getColumnName()).append(": ").append(result.getString(column.getColumnName())).append(", ");
-                }
-                sb.append("\n");
-            } else {
-                sb.append("KustoResultSetTable has no columns.");
             }
         } catch (Exception e) {
             log.error("Failed to convert result set to string. Reason: {}", e);

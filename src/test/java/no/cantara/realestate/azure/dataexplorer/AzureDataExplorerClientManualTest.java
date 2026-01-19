@@ -4,6 +4,10 @@ import com.microsoft.azure.kusto.data.KustoResultSetTable;
 import no.cantara.config.ApplicationProperties;
 import org.slf4j.Logger;
 
+import java.util.List;
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.slf4j.LoggerFactory.getLogger;
 
 class AzureDataExplorerClientManualTest {
@@ -19,7 +23,7 @@ class AzureDataExplorerClientManualTest {
             String tenantId = config.get("azure.dataexplorer.tenantId");
             String database = config.get("azure.dataexplorer.database","default");
             AzureDataExplorerClient dataExplorerClient = new AzureDataExplorerClient(clusterUri, applicationId, applicationKey, tenantId, database);
-            String query = "observations | take 1";
+            String query = "observations | take 2";
             KustoResultSetTable result = dataExplorerClient.runQuery(query);
             log.info("Query executed successfully. Retrieved results: {}", dataExplorerClient.resultsetToString(result));
             if (dataExplorerClient.validateResult(result, "true")) {
@@ -27,6 +31,11 @@ class AzureDataExplorerClientManualTest {
             } else {
                 log.warn("Validation failed: 'true' not found in results.");
             }
+
+            KustoResultSetTable primaryResult = dataExplorerClient.runQuery(query);
+            List<Map<String, Object>> observationList = dataExplorerClient.mapToList(primaryResult);
+            assertEquals(2, observationList.size(), "Expected two observations in the result.");
+
 
         } catch (Exception e) {
             log.error("Failed to create Azure Data Explorer client: {}", e.getMessage(), e);
