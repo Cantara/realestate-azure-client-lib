@@ -129,23 +129,17 @@ public class AzureDataExplorerClient {
             log.trace("Result set or expected string is null");
             return false;
         }
+        boolean isValid = false;
         try {
-            while (result.next()) {
-                KustoResultColumn[] columns = result.getColumns();
-                for (KustoResultColumn column : columns) {
-                    try {
-                        if (column.getColumnName() != null && result.getObject(column.getColumnName()) != null) {
-                            String value = result.getString(column.getColumnName());
-                            log.info("{} - {}: {}", expectedString, column.getColumnName(), value);
-                        } else {
-                            log.warn("{} - Column is null or result.getObject is null", expectedString);
-                        }
-                    } catch (NullPointerException e) {
-                        log.warn("{} - NullPointerException while processing column. Reason: {}", expectedString, e);
-                    }
-                }
-            }
-            return true;
+           String resultAsString = resultsetToString(result);
+           log.debug("Validating result set. Expected to find: {} in result set.", expectedString);
+           if (resultAsString.contains(expectedString)) {
+               log.debug("Validation successful. Found expected string: {} in result set.", expectedString);
+               isValid = true;
+           } else {
+               log.debug("Validation failed. Expected string: {} not found in result set.", expectedString);
+           }
+            return isValid;
         } catch (Exception e) {
             log.error("{} - Failed to process result set. Reason: {}", expectedString, e);
             throw new RuntimeException(e);
