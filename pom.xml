@@ -57,7 +57,7 @@
     <dependency>
       <groupId>com.azure</groupId>
       <artifactId>azure-core</artifactId>
-      <version>1.57.0</version>
+      <version>1.57.1</version>
     </dependency>
     <dependency>
       <groupId>com.azure</groupId>
@@ -67,7 +67,7 @@
     <dependency>
       <groupId>com.azure</groupId>
       <artifactId>azure-identity</artifactId>
-      <version>1.18.1</version>
+      <version>1.18.2</version>
     </dependency>
     <dependency>
       <groupId>com.microsoft.azure.sdk.iot</groupId>
@@ -87,7 +87,7 @@
     <dependency>
       <groupId>com.azure</groupId>
       <artifactId>azure-storage-blob</artifactId>
-      <version>12.32.0</version>
+      <version>12.33.0</version>
     </dependency>
     <dependency>
       <groupId>com.microsoft.azure.kusto</groupId>
