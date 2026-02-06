@@ -57,17 +57,17 @@
     <dependency>
       <groupId>com.azure</groupId>
       <artifactId>azure-core</artifactId>
-      <version>1.57.0</version>
+      <version>1.57.1</version>
     </dependency>
     <dependency>
       <groupId>com.azure</groupId>
       <artifactId>azure-digitaltwins-core</artifactId>
-      <version>1.5.4</version>
+      <version>1.5.5</version>
     </dependency>
     <dependency>
       <groupId>com.azure</groupId>
       <artifactId>azure-identity</artifactId>
-      <version>1.18.1</version>
+      <version>1.18.2</version>
     </dependency>
     <dependency>
       <groupId>com.microsoft.azure.sdk.iot</groupId>
@@ -82,12 +82,12 @@
     <dependency>
       <groupId>com.azure</groupId>
       <artifactId>azure-data-tables</artifactId>
-      <version>12.5.8</version>
+      <version>12.5.9</version>
     </dependency>
     <dependency>
       <groupId>com.azure</groupId>
       <artifactId>azure-storage-blob</artifactId>
-      <version>12.32.0</version>
+      <version>12.33.2</version>
     </dependency>
     <dependency>
       <groupId>com.microsoft.azure.kusto</groupId>
