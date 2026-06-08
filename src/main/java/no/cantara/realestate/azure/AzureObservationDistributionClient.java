@@ -19,6 +19,7 @@ import io.opentelemetry.context.Scope;
 import no.cantara.realestate.ExceptionStatusType;
 import no.cantara.realestate.RealEstateException;
 import no.cantara.realestate.azure.iot.AzureDeviceClient;
+import no.cantara.realestate.azure.iot.MqttSendCircuitBreaker;
 import no.cantara.realestate.azure.iot.MqttSendFailureClassifier;
 import no.cantara.realestate.azure.iot.MqttSendFailureType;
 import no.cantara.realestate.azure.iot.MqttSendThrottle;
@@ -60,6 +61,11 @@ public class AzureObservationDistributionClient implements ObservationDistributi
     // Adaptive back-off (issue #440). Brakes the send rate when IoT Hub reports overload
     // (THROTTLED/QUOTA_EXCEEDED) and recovers automatically on success.
     private final MqttSendThrottle sendThrottle = new MqttSendThrottle();
+
+    // Circuit breaker (issue #441). Hard-stops new sends when the quota is exhausted or throttling
+    // is persistent; rejected messages are counted (not silently lost) and resume on recovery.
+    private final MqttSendCircuitBreaker circuitBreaker = new MqttSendCircuitBreaker();
+    private long numberOfMessagesRejected = 0;
 
     private final Tracer tracer;
     private final TelemetryClient telemetryClient;
@@ -154,6 +160,10 @@ public class AzureObservationDistributionClient implements ObservationDistributi
                 log.trace("Missing observations message, not able to publish");
                 return;
             }
+            if (!circuitBreaker.allowSend()) {
+                rejectSend(observationMessage);
+                return;
+            }
             applyBackpressureIfThrottled();
             boolean success = false;
             Span childSpan = tracer.spanBuilder("SendTelemetry").setSpanKind(SpanKind.CLIENT).startSpan();
@@ -203,7 +213,7 @@ public class AzureObservationDistributionClient implements ObservationDistributi
                             childSpan.setAttribute("http.response.status_code", "200");
                             childSpan.addEvent("Message sent");
                             addMessagesPublished();
-                            sendThrottle.recordOutcome(MqttSendFailureType.NONE);
+                            registerSuccess();
                         }
                         log.debug("Observation - Response from IoT Hub: message Id={}, status={}", msg.getMessageId(), iotHubClientException == null ? OK : iotHubClientException.getStatusCode());
                         messageSent(sentMessage);
@@ -236,9 +246,15 @@ public class AzureObservationDistributionClient implements ObservationDistributi
         return true;
     }
 
+    /**
+     * Reflects whether sending is operational (issue #441). Returns {@code false} while the send
+     * circuit is open — i.e. new messages are being rejected because the IoT Hub device quota is
+     * exhausted or throttling is persistent. A short adaptive brake (#440) does not make the client
+     * unhealthy; only a hard stop does.
+     */
     @Override
     public boolean isHealthy() {
-        return true;
+        return !circuitBreaker.isOpen();
     }
 
     @Override
@@ -370,6 +386,11 @@ public class AzureObservationDistributionClient implements ObservationDistributi
         lastFailureAt = Instant.ofEpochMilli(System.currentTimeMillis());
         addMessagesFailed();
         sendThrottle.recordOutcome(failureType);
+        circuitBreaker.recordOutcome(failureType, sendThrottle.getConsecutiveOverloads());
+        if (failureType == MqttSendFailureType.QUOTA_EXCEEDED && azureDeviceClient != null) {
+            // Quota is gone — stop the SDK from retrying too, until sending recovers.
+            azureDeviceClient.useNoRetryPolicy();
+        }
         IotHubStatusCode statusCode = exception == null ? null : exception.getStatusCode();
         switch (failureType) {
             case QUOTA_EXCEEDED:
@@ -468,6 +489,63 @@ public class AzureObservationDistributionClient implements ObservationDistributi
      */
     public int getConsecutiveOverloads() {
         return sendThrottle.getConsecutiveOverloads();
+    }
+
+    /**
+     * Reject a message because the send circuit is open (issue #441). The message is dropped on
+     * purpose — buffering it risks running out of memory and retrying it is the self-DoS we are
+     * preventing — but it is counted and logged so the loss is defined and observable, never silent.
+     */
+    private void rejectSend(ObservationMessage observationMessage) {
+        addMessagesRejected();
+        telemetryClient.trackEvent("error-publish-observationmessage-circuit-open");
+        log.debug("MQTT send circuit OPEN (reason={}); rejecting observationMessage. Rejected total={}",
+                circuitBreaker.getOpenReason(), numberOfMessagesRejected);
+    }
+
+    /**
+     * Record a successful send: reset the back-off (#440), close the circuit if it was open (#441),
+     * and restore the bounded retry policy if it had been switched to NoRetry on quota exhaustion.
+     */
+    private void registerSuccess() {
+        sendThrottle.recordOutcome(MqttSendFailureType.NONE);
+        boolean wasOpen = circuitBreaker.isOpen();
+        circuitBreaker.recordOutcome(MqttSendFailureType.NONE, 0);
+        if (wasOpen && !circuitBreaker.isOpen() && azureDeviceClient != null) {
+            azureDeviceClient.useDefaultRetryPolicy();
+        }
+    }
+
+    synchronized void addMessagesRejected() {
+        if (numberOfMessagesRejected < Long.MAX_VALUE) {
+            numberOfMessagesRejected++;
+        } else {
+            numberOfMessagesRejected = 1;
+        }
+    }
+
+    /**
+     * @return how many messages were rejected (dropped) because the send circuit was open (#441).
+     * A non-zero, rising value means sending is stopped and observations are being lost.
+     */
+    public long getNumberOfMessagesRejected() {
+        return numberOfMessagesRejected;
+    }
+
+    /**
+     * @return {@code true} if new sends are currently being rejected because IoT Hub is overloaded
+     * (the send circuit is open). Mirrors {@code !isHealthy()}.
+     */
+    public boolean isSendingStopped() {
+        return circuitBreaker.isOpen();
+    }
+
+    /**
+     * @return the failure category that stopped sending ({@code QUOTA_EXCEEDED} or {@code THROTTLED}),
+     * or {@code null} if sending is not stopped.
+     */
+    public MqttSendFailureType getSendStoppedReason() {
+        return circuitBreaker.getOpenReason();
     }
 
     @Override

@@ -3,6 +3,7 @@ package no.cantara.realestate.azure.iot;
 import com.microsoft.azure.sdk.iot.device.*;
 import com.microsoft.azure.sdk.iot.device.exceptions.IotHubClientException;
 import com.microsoft.azure.sdk.iot.device.transport.ExponentialBackoffWithJitter;
+import com.microsoft.azure.sdk.iot.device.transport.NoRetry;
 import com.microsoft.azure.sdk.iot.device.transport.RetryPolicy;
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.trace.Span;
@@ -83,6 +84,24 @@ public class AzureDeviceClient {
         if (deviceClient != null && retryPolicy != null) {
             deviceClient.setRetryPolicy(retryPolicy);
         }
+    }
+
+    /**
+     * Stop the SDK from retrying at all (issue #441). Used when the device message quota is
+     * exhausted ({@code QUOTA_EXCEEDED}): retrying cannot succeed until the quota window resets and
+     * only worsens the self-DoS.
+     */
+    public void useNoRetryPolicy() {
+        setRetryPolicy(new NoRetry());
+        log.warn("Switched IoT Hub retry policy to NoRetry (quota exhausted / sending stopped).");
+    }
+
+    /**
+     * Restore the bounded retry policy (issue #440) — used when sending recovers after having been
+     * stopped by {@link #useNoRetryPolicy()}.
+     */
+    public void useDefaultRetryPolicy() {
+        applyBoundedRetryPolicy();
     }
 
     public void openConnection() {
