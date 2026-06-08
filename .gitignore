@@ -34,3 +34,9 @@ dependency-reduced-pom.xml
 
 # Config
 local_override.properties
+
+# Claude Code
+.claude/
+
+# Generated dependency reports
+dependency-tree.txt

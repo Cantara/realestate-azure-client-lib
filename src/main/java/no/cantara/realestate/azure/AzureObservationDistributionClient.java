@@ -5,6 +5,7 @@ import com.google.auto.service.AutoService;
 import com.microsoft.applicationinsights.TelemetryClient;
 import com.microsoft.applicationinsights.telemetry.Duration;
 import com.microsoft.applicationinsights.telemetry.RemoteDependencyTelemetry;
+import com.microsoft.azure.sdk.iot.device.IotHubStatusCode;
 import com.microsoft.azure.sdk.iot.device.Message;
 import com.microsoft.azure.sdk.iot.device.MessageSentCallback;
 import com.microsoft.azure.sdk.iot.device.MessageType;
@@ -18,6 +19,8 @@ import io.opentelemetry.context.Scope;
 import no.cantara.realestate.ExceptionStatusType;
 import no.cantara.realestate.RealEstateException;
 import no.cantara.realestate.azure.iot.AzureDeviceClient;
+import no.cantara.realestate.azure.iot.MqttSendFailureClassifier;
+import no.cantara.realestate.azure.iot.MqttSendFailureType;
 import no.cantara.realestate.azure.rec.RecObservationMessage;
 import no.cantara.realestate.distribution.ObservationDistributionClient;
 import no.cantara.realestate.json.RealEstateObjectMapper;
@@ -46,6 +49,12 @@ public class AzureObservationDistributionClient implements ObservationDistributi
     private long numberOfMessagesObserved = 0;
     private long numberOfMessagesPublished = 0;
     private long numberOfMessagesFailed = 0;
+
+    // Detection of MQTT/IoT Hub send failures (issue #439). Counts per failure category plus the
+    // most recent failure, so throttling (#440) and stop-sending (#441) have something to react to.
+    private final Map<MqttSendFailureType, Long> failuresByType = new EnumMap<>(MqttSendFailureType.class);
+    private volatile MqttSendFailureType lastFailureType = MqttSendFailureType.NONE;
+    private volatile Instant lastFailureAt = null;
 
     private final Tracer tracer;
     private final TelemetryClient telemetryClient;
@@ -172,14 +181,15 @@ public class AzureObservationDistributionClient implements ObservationDistributi
                         //koble denne målingen til en eller annen "parent"
 
                         if (iotHubClientException != null) {
-                            log.debug("Failed to send {} as Message {} to Azure IoT Hub. Exception: {}", observationMessage, sentMessage, iotHubClientException);
+                            MqttSendFailureType failureType = registerFailure(iotHubClientException, observationMessage);
                             dependencyTelemetry.setSuccess(false);
                             childSpan.setStatus(StatusCode.ERROR, iotHubClientException.getMessage());
                             childSpan.setAttribute("http.response.status_code", "500");
+                            childSpan.setAttribute("mqtt.failure.type", failureType.name());
+                            childSpan.setAttribute("iothub.status_code", String.valueOf(iotHubClientException.getStatusCode()));
                             childSpan.addEvent("Failed to send message");
                             childSpan.recordException(iotHubClientException);
-                            log.error("Error sending message", iotHubClientException);
-                            addMessagesFailed();
+                            telemetryClient.trackEvent("error-publish-observationmessage-" + failureType.name());
                         } else {
                             //telemetryClient.TrackDependency("myDependencyType", "myDependencyCall", "myDependencyData",  startTime, timer.Elapsed, success);
                             log.debug("Message sent: {}", sentMessage);
@@ -334,6 +344,79 @@ public class AzureObservationDistributionClient implements ObservationDistributi
         } else {
             numberOfMessagesFailed = 1;
         }
+    }
+
+    /**
+     * Detect and record what kind of IoT Hub send failure occurred (issue #439).
+     * Classifies the exception, updates the per-category counters and the last-failure state, and
+     * logs at a severity that matches the category. Returns the detected type so the caller can
+     * annotate telemetry/spans.
+     *
+     * <p>This method only <em>detects and reports</em>. Backing off (#440) and stopping new sends
+     * (#441) are deliberately left out — they will hook into the {@link MqttSendFailureType}
+     * returned here and the counters exposed by {@link #getFailureCountsByType()}.
+     */
+    synchronized MqttSendFailureType registerFailure(IotHubClientException exception, ObservationMessage observationMessage) {
+        MqttSendFailureType failureType = MqttSendFailureClassifier.classify(exception);
+        failuresByType.merge(failureType, 1L, Long::sum);
+        lastFailureType = failureType;
+        lastFailureAt = Instant.ofEpochMilli(System.currentTimeMillis());
+        addMessagesFailed();
+        IotHubStatusCode statusCode = exception == null ? null : exception.getStatusCode();
+        switch (failureType) {
+            case QUOTA_EXCEEDED:
+                log.error("Azure IoT Hub QUOTA_EXCEEDED: device message quota is exhausted. " +
+                        "Retrying makes the self-DoS worse; new sending should stop until the quota window resets. " +
+                        "statusCode={}, observationMessage={}", statusCode, observationMessage, exception);
+                break;
+            case THROTTLED:
+                log.warn("Azure IoT Hub THROTTLED/SERVER_BUSY: sending too fast. Back off before retrying. " +
+                        "statusCode={}, observationMessage={}", statusCode, observationMessage, exception);
+                break;
+            case FATAL:
+                log.error("Azure IoT Hub permanent send failure: retrying will not help, message should be dropped. " +
+                        "statusCode={}, observationMessage={}", statusCode, observationMessage, exception);
+                break;
+            case TRANSIENT:
+                log.warn("Azure IoT Hub transient send failure: safe to retry after a delay. " +
+                        "statusCode={}, observationMessage={}", statusCode, observationMessage, exception);
+                break;
+            default:
+                log.warn("Azure IoT Hub unrecognized send failure. statusCode={}, observationMessage={}",
+                        statusCode, observationMessage, exception);
+        }
+        return failureType;
+    }
+
+    /**
+     * @return how many sends failed with the given {@link MqttSendFailureType} since startup.
+     */
+    public synchronized long getNumberOfMessagesFailed(MqttSendFailureType failureType) {
+        return failuresByType.getOrDefault(failureType, 0L);
+    }
+
+    /**
+     * @return a snapshot of the failure counts per category since startup. Useful for health
+     * endpoints and metrics — e.g. a rising {@link MqttSendFailureType#QUOTA_EXCEEDED} or
+     * {@link MqttSendFailureType#THROTTLED} count indicates IoT Hub overload.
+     */
+    public synchronized Map<MqttSendFailureType, Long> getFailureCountsByType() {
+        return new EnumMap<>(failuresByType);
+    }
+
+    /**
+     * @return the category of the most recent send failure, or {@link MqttSendFailureType#NONE}
+     * if no send has failed yet.
+     */
+    public MqttSendFailureType getLastFailureType() {
+        return lastFailureType;
+    }
+
+    /**
+     * @return the instant of the most recent send failure, or {@code null} if none has occurred.
+     */
+    public Instant getLastFailureAt() {
+        return lastFailureAt;
     }
 
     @Override
