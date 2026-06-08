@@ -182,14 +182,8 @@ Notes:
 - `getLastFailureType()` / `getLastFailureAt()` are read without locking (`volatile`); the
   count getters return a consistent snapshot.
 - A rising `QUOTA_EXCEEDED` or `THROTTLED` count is the signal that IoT Hub is overloaded.
-- `isHealthy()` still returns `true` unconditionally — that is intentionally left for #441.
-  Do not rely on `isHealthy()` for overload detection yet; use the failure counters instead.
-
-## Hooks left for #441
-
-- **#441 (stop):** when `getLastFailureType() == QUOTA_EXCEEDED` (or repeated `THROTTLED`),
-  flip a real health flag so `publish()` pauses/rejects new sends, switch the SDK to `NoRetry`
-  via `AzureDeviceClient.setRetryPolicy(...)`, and make `isHealthy()` reflect it.
+- For the *health* of sending (stopped or not), use `isHealthy()` / `isSendingStopped()` — wired
+  by #441 (below). The per-category counters remain the finest-grained overload signal.
 
 ---
 
@@ -246,7 +240,62 @@ Notes:
   intended braking; the hard stop is #441.
 - Defaults are constants, not yet externally configurable — tune in code or follow up with
   config keys if ops needs it.
-- `isHealthy()` still returns `true` — unchanged, still left for #441.
+- `isHealthy()` is now made meaningful by #441 (see below).
+
+---
+
+# #441 Stop — implemented
+
+The stop step is the **hard stop** that complements the #440 brake: when IoT Hub overload is
+not transient, new sends are rejected outright until sending recovers. `isHealthy()` now
+reflects this.
+
+## Circuit breaker (`MqttSendCircuitBreaker`)
+
+`MqttSendCircuitBreaker` (`no.cantara.realestate.azure.iot`) is a time-based breaker driven by
+the #439 classification:
+
+| Trigger | Action | Default cooldown |
+|---|---|---|
+| `QUOTA_EXCEEDED` (once) | open immediately — quota is gone, retrying can't succeed | 5 min probe cadence |
+| `THROTTLED` ≥ threshold in a row | open — persistent back-pressure, not a one-off | 30 s |
+| success (`NONE`) | close — resume normal sending | — |
+
+Threshold default: **5** consecutive `THROTTLED` (`DEFAULT_THROTTLE_THRESHOLD`).
+
+While **open**, `allowSend()` returns `false`. After the cooldown elapses it allows a single
+**probe** send (pushing the gate forward so probes don't flood while awaiting the async ack);
+a successful probe closes the circuit, a failed one re-opens it.
+
+## Wiring in `AzureObservationDistributionClient`
+
+- `publish()` checks `circuitBreaker.allowSend()` first; when open it calls `rejectSend(...)` —
+  the message is **dropped on purpose**, but counted (`getNumberOfMessagesRejected()`) and
+  logged, so the loss is **defined and observable, never silent**. Buffering was rejected
+  (OOM risk) and retrying is the very self-DoS being prevented.
+- On `QUOTA_EXCEEDED` the SDK retry policy is switched to `NoRetry`
+  (`AzureDeviceClient.useNoRetryPolicy()`); on recovery the bounded policy (#440) is restored
+  (`useDefaultRetryPolicy()`).
+- **`isHealthy()` now returns `false` while the circuit is open.** A short adaptive brake (#440)
+  does *not* make the client unhealthy — only a hard stop does.
+
+## How to use it (for client applications)
+
+```java
+AzureObservationDistributionClient client = ...;
+
+client.isHealthy();                  // false while sending is stopped (circuit open)
+client.isSendingStopped();           // same signal, affirmative naming
+client.getSendStoppedReason();       // QUOTA_EXCEEDED / THROTTLED, or null when healthy
+client.getNumberOfMessagesRejected();// messages dropped because sending was stopped
+```
+
+Notes:
+
+- Rejected messages are **lost by design** during a stop — monitor
+  `getNumberOfMessagesRejected()` and `isHealthy()`/`getSendStoppedReason()` and alert on them.
+- Recovery is automatic: a probe send after the cooldown closes the circuit on success.
+- Cooldowns/threshold are constants, not yet externally configurable.
 
 ---
 
