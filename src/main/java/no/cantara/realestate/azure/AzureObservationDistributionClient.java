@@ -21,6 +21,7 @@ import no.cantara.realestate.RealEstateException;
 import no.cantara.realestate.azure.iot.AzureDeviceClient;
 import no.cantara.realestate.azure.iot.MqttSendFailureClassifier;
 import no.cantara.realestate.azure.iot.MqttSendFailureType;
+import no.cantara.realestate.azure.iot.MqttSendThrottle;
 import no.cantara.realestate.azure.rec.RecObservationMessage;
 import no.cantara.realestate.distribution.ObservationDistributionClient;
 import no.cantara.realestate.json.RealEstateObjectMapper;
@@ -55,6 +56,10 @@ public class AzureObservationDistributionClient implements ObservationDistributi
     private final Map<MqttSendFailureType, Long> failuresByType = new EnumMap<>(MqttSendFailureType.class);
     private volatile MqttSendFailureType lastFailureType = MqttSendFailureType.NONE;
     private volatile Instant lastFailureAt = null;
+
+    // Adaptive back-off (issue #440). Brakes the send rate when IoT Hub reports overload
+    // (THROTTLED/QUOTA_EXCEEDED) and recovers automatically on success.
+    private final MqttSendThrottle sendThrottle = new MqttSendThrottle();
 
     private final Tracer tracer;
     private final TelemetryClient telemetryClient;
@@ -149,6 +154,7 @@ public class AzureObservationDistributionClient implements ObservationDistributi
                 log.trace("Missing observations message, not able to publish");
                 return;
             }
+            applyBackpressureIfThrottled();
             boolean success = false;
             Span childSpan = tracer.spanBuilder("SendTelemetry").setSpanKind(SpanKind.CLIENT).startSpan();
             childSpan.setAttribute("appName", "IoTHubClient");
@@ -197,6 +203,7 @@ public class AzureObservationDistributionClient implements ObservationDistributi
                             childSpan.setAttribute("http.response.status_code", "200");
                             childSpan.addEvent("Message sent");
                             addMessagesPublished();
+                            sendThrottle.recordOutcome(MqttSendFailureType.NONE);
                         }
                         log.debug("Observation - Response from IoT Hub: message Id={}, status={}", msg.getMessageId(), iotHubClientException == null ? OK : iotHubClientException.getStatusCode());
                         messageSent(sentMessage);
@@ -352,9 +359,9 @@ public class AzureObservationDistributionClient implements ObservationDistributi
      * logs at a severity that matches the category. Returns the detected type so the caller can
      * annotate telemetry/spans.
      *
-     * <p>This method only <em>detects and reports</em>. Backing off (#440) and stopping new sends
-     * (#441) are deliberately left out — they will hook into the {@link MqttSendFailureType}
-     * returned here and the counters exposed by {@link #getFailureCountsByType()}.
+     * <p>Detection (#439) feeds the adaptive back-off (#440): the classified type is handed to
+     * {@link #sendThrottle}, which escalates the brake on overload responses. Stopping new sends
+     * outright (#441) is still left out.
      */
     synchronized MqttSendFailureType registerFailure(IotHubClientException exception, ObservationMessage observationMessage) {
         MqttSendFailureType failureType = MqttSendFailureClassifier.classify(exception);
@@ -362,6 +369,7 @@ public class AzureObservationDistributionClient implements ObservationDistributi
         lastFailureType = failureType;
         lastFailureAt = Instant.ofEpochMilli(System.currentTimeMillis());
         addMessagesFailed();
+        sendThrottle.recordOutcome(failureType);
         IotHubStatusCode statusCode = exception == null ? null : exception.getStatusCode();
         switch (failureType) {
             case QUOTA_EXCEEDED:
@@ -417,6 +425,49 @@ public class AzureObservationDistributionClient implements ObservationDistributi
      */
     public Instant getLastFailureAt() {
         return lastFailureAt;
+    }
+
+    /**
+     * Brake the send rate when IoT Hub is signalling overload (issue #440). Called at the start of
+     * {@link #publish(ObservationMessage)} on the distributor thread, so braking here naturally
+     * slows the whole pipeline. When not throttled the delay is {@code 0} and this is a no-op.
+     */
+    protected void applyBackpressureIfThrottled() {
+        long delayMillis = sendThrottle.currentBackoffDelayMillis();
+        if (delayMillis <= 0) {
+            return;
+        }
+        log.warn("Braking Azure IoT Hub sending for {} ms after {} consecutive overload responses",
+                delayMillis, sendThrottle.getConsecutiveOverloads());
+        telemetryClient.trackEvent("throttle-backpressure-applied");
+        try {
+            Thread.sleep(delayMillis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /**
+     * @return milliseconds the client is currently braking before the next send ({@code 0} when not
+     * throttled). A non-zero value means IoT Hub recently reported overload.
+     */
+    public long getThrottleBackoffMillis() {
+        return sendThrottle.currentBackoffDelayMillis();
+    }
+
+    /**
+     * @return {@code true} if sending is currently being braked due to IoT Hub overload (#440).
+     */
+    public boolean isThrottled() {
+        return sendThrottle.isThrottled();
+    }
+
+    /**
+     * @return the number of consecutive overload responses (THROTTLED/QUOTA_EXCEEDED) since the
+     * last successful send. Resets to 0 on success.
+     */
+    public int getConsecutiveOverloads() {
+        return sendThrottle.getConsecutiveOverloads();
     }
 
     @Override

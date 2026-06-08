@@ -2,6 +2,8 @@ package no.cantara.realestate.azure.iot;
 
 import com.microsoft.azure.sdk.iot.device.*;
 import com.microsoft.azure.sdk.iot.device.exceptions.IotHubClientException;
+import com.microsoft.azure.sdk.iot.device.transport.ExponentialBackoffWithJitter;
+import com.microsoft.azure.sdk.iot.device.transport.RetryPolicy;
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanKind;
@@ -16,6 +18,15 @@ import static org.slf4j.LoggerFactory.getLogger;
 public class AzureDeviceClient {
     private static final Logger log = getLogger(AzureDeviceClient.class);
 
+    // Bounded retry policy (issue #440). The SDK default ExponentialBackoffWithJitter retries
+    // ~Integer.MAX_VALUE times, which is the source of the "same message retried ~23 times" runaway
+    // that DoS-es us against IoT Hub. Cap the attempts so the SDK gives up and hands control back
+    // to the application-level throttle/stop logic.
+    static final int DEFAULT_MAX_RETRIES = 3;
+    static final long DEFAULT_MIN_BACKOFF_MILLIS = 100L;
+    static final long DEFAULT_MAX_BACKOFF_MILLIS = 10_000L;
+    static final long DEFAULT_BACKOFF_DELTA_MILLIS = 100L;
+
     private final DeviceClient deviceClient;
     private final Tracer tracer;
 
@@ -29,6 +40,7 @@ public class AzureDeviceClient {
         if (deviceClient != null && deviceClient.getConfig() != null) {
             iotHubHostname = deviceClient.getConfig().getIotHubHostname();
         }
+        applyBoundedRetryPolicy();
         tracer = GlobalOpenTelemetry.getTracer(INSTRUMENTATION_SCOPE_NAME);
     }
 
@@ -40,7 +52,37 @@ public class AzureDeviceClient {
         if (deviceClient != null && deviceClient.getConfig() != null) {
             iotHubHostname = deviceClient.getConfig().getIotHubHostname();
         }
+        applyBoundedRetryPolicy();
         tracer = GlobalOpenTelemetry.getTracer(INSTRUMENTATION_SCOPE_NAME);
+    }
+
+    /**
+     * Replace the SDK's effectively-infinite default retry policy with a bounded one, so a single
+     * message is retried only a handful of times before the SDK gives up (issue #440).
+     */
+    private void applyBoundedRetryPolicy() {
+        if (deviceClient == null) {
+            return;
+        }
+        RetryPolicy boundedPolicy = new ExponentialBackoffWithJitter(
+                DEFAULT_MAX_RETRIES,
+                DEFAULT_MIN_BACKOFF_MILLIS,
+                DEFAULT_MAX_BACKOFF_MILLIS,
+                DEFAULT_BACKOFF_DELTA_MILLIS,
+                true);
+        deviceClient.setRetryPolicy(boundedPolicy);
+        log.info("Configured bounded IoT Hub retry policy: maxRetries={}, minBackoffMillis={}, maxBackoffMillis={}",
+                DEFAULT_MAX_RETRIES, DEFAULT_MIN_BACKOFF_MILLIS, DEFAULT_MAX_BACKOFF_MILLIS);
+    }
+
+    /**
+     * Override the SDK retry policy. Used by #441 to switch to {@code NoRetry} when the device
+     * message quota is exhausted, and available for tuning/testing.
+     */
+    public void setRetryPolicy(RetryPolicy retryPolicy) {
+        if (deviceClient != null && retryPolicy != null) {
+            deviceClient.setRetryPolicy(retryPolicy);
+        }
     }
 
     public void openConnection() {

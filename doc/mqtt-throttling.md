@@ -185,13 +185,68 @@ Notes:
 - `isHealthy()` still returns `true` unconditionally — that is intentionally left for #441.
   Do not rely on `isHealthy()` for overload detection yet; use the failure counters instead.
 
-## Hooks left for #440 and #441
+## Hooks left for #441
 
-- **#440 (throttle):** read the returned `MqttSendFailureType` (and `isRetryable()`) to drive
-  back-off; configure a bounded SDK retry policy via `AzureDeviceClient`.
 - **#441 (stop):** when `getLastFailureType() == QUOTA_EXCEEDED` (or repeated `THROTTLED`),
-  flip a real health flag so `publish()` pauses/rejects new sends, and make `isHealthy()`
-  reflect it.
+  flip a real health flag so `publish()` pauses/rejects new sends, switch the SDK to `NoRetry`
+  via `AzureDeviceClient.setRetryPolicy(...)`, and make `isHealthy()` reflect it.
+
+---
+
+# #440 Throttle — implemented
+
+The throttle step **brakes** sending when IoT Hub is overloaded; it does **not** fully stop
+(that is #441). It addresses both retry layers identified above.
+
+## Layer 1 — bounded SDK retry policy (`AzureDeviceClient`)
+
+The runaway "same message retried ~23 times" came from the SDK's default
+`ExponentialBackoffWithJitter`, which retries ~`Integer.MAX_VALUE` times. `AzureDeviceClient`
+now installs a **bounded** policy on construction via `deviceClient.setRetryPolicy(...)`:
+
+| Setting            | Default | Constant in `AzureDeviceClient` |
+|--------------------|---------|---------------------------------|
+| max retries        | 3       | `DEFAULT_MAX_RETRIES`           |
+| min backoff (ms)   | 100     | `DEFAULT_MIN_BACKOFF_MILLIS`    |
+| max backoff (ms)   | 10 000  | `DEFAULT_MAX_BACKOFF_MILLIS`    |
+| backoff delta (ms) | 100     | `DEFAULT_BACKOFF_DELTA_MILLIS`  |
+
+`AzureDeviceClient.setRetryPolicy(RetryPolicy)` is also exposed so #441 can switch to `NoRetry`
+on `QUOTA_EXCEEDED`.
+
+## Layer 2 — adaptive app-level back-off (`MqttSendThrottle`)
+
+`MqttSendThrottle` (`no.cantara.realestate.azure.iot`) keeps an exponential back-off window
+driven by the #439 classification:
+
+- an **overload** outcome (`THROTTLED` / `QUOTA_EXCEEDED`, i.e. `isOverload()`) escalates the
+  window: `base * 2^(consecutive-1)`, capped at max (defaults 1 s base, 60 s cap);
+- a **success** (`NONE`) resets it immediately;
+- other failures leave the window to expire on its own.
+
+`AzureObservationDistributionClient.publish()` calls `applyBackpressureIfThrottled()` on the
+distributor thread before each send; when a window is active it sleeps for the remaining delay,
+which naturally brakes the whole pipeline. The throttle is fed from the send callback
+(`recordOutcome(NONE)` on success, `recordOutcome(type)` on failure).
+
+## How to use it (for client applications)
+
+```java
+AzureObservationDistributionClient client = ...;
+
+client.isThrottled();              // true while braking due to overload
+client.getThrottleBackoffMillis(); // remaining brake delay in ms (0 when not throttled)
+client.getConsecutiveOverloads();  // overload responses since last success (resets on success)
+```
+
+Notes:
+
+- The brake runs on the **distributor thread** — while throttled, observations accumulate in
+  the upstream `ObservationsRepository` queue (bounded; see the silent-drop analysis). This is
+  intended braking; the hard stop is #441.
+- Defaults are constants, not yet externally configurable — tune in code or follow up with
+  config keys if ops needs it.
+- `isHealthy()` still returns `true` — unchanged, still left for #441.
 
 ---
 
