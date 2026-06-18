@@ -18,11 +18,7 @@ import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.context.Scope;
 import no.cantara.realestate.ExceptionStatusType;
 import no.cantara.realestate.RealEstateException;
-import no.cantara.realestate.azure.iot.AzureDeviceClient;
-import no.cantara.realestate.azure.iot.MqttSendCircuitBreaker;
-import no.cantara.realestate.azure.iot.MqttSendFailureClassifier;
-import no.cantara.realestate.azure.iot.MqttSendFailureType;
-import no.cantara.realestate.azure.iot.MqttSendThrottle;
+import no.cantara.realestate.azure.iot.*;
 import no.cantara.realestate.azure.rec.RecObservationMessage;
 import no.cantara.realestate.distribution.ObservationDistributionClient;
 import no.cantara.realestate.json.RealEstateObjectMapper;
@@ -42,6 +38,7 @@ import static org.slf4j.LoggerFactory.getLogger;
 public class AzureObservationDistributionClient implements ObservationDistributionClient, DistributionService {
     private static final Logger log = getLogger(AzureObservationDistributionClient.class);
     private static final int DEFAULT_MAX_SIZE = 1000;
+    public static final int MAX_CONSECUTIVE_CLIENT_DISCONNECT_ERRORS = 20;
     public static final String CONNECTIONSTRING_KEY = "distribution.azure.connectionString";
 
     private final AzureDeviceClient azureDeviceClient;
@@ -247,14 +244,28 @@ public class AzureObservationDistributionClient implements ObservationDistributi
     }
 
     /**
-     * Reflects whether sending is operational (issue #441). Returns {@code false} while the send
-     * circuit is open — i.e. new messages are being rejected because the IoT Hub device quota is
-     * exhausted or throttling is persistent. A short adaptive brake (#440) does not make the client
-     * unhealthy; only a hard stop does.
+     * Reflects whether sending is operational. Returns {@code false} when either:
+     * <ul>
+     *     <li>the send circuit is open (#441) — new messages are being rejected because the IoT Hub
+     *     device quota is exhausted or throttling is persistent; or</li>
+     *     <li>the MQTT link has been down for {@link #MAX_CONSECUTIVE_CLIENT_DISCONNECT_ERRORS}
+     *     consecutive sends ({@code "Cannot publish when mqtt client is disconnected"}). Sending is
+     *     <em>not</em> stopped in this case — the adaptive brake (#440) keeps retrying — but a
+     *     sustained disconnect is surfaced as unhealthy so monitoring can alert on it.</li>
+     * </ul>
+     * A short adaptive brake on its own does not make the client unhealthy; only a hard stop or a
+     * sustained disconnect does. Recovers automatically: a single successful send resets the
+     * disconnect counter and the client reports healthy again.
      */
     @Override
     public boolean isHealthy() {
-        return !circuitBreaker.isOpen();
+        boolean isConnectionOpen = !circuitBreaker.isOpen();
+        int connectionFailures = sendThrottle.getConsecutiveTransientFailures();
+        boolean connectionErrorsBelowTreshold = connectionFailures <= MAX_CONSECUTIVE_CLIENT_DISCONNECT_ERRORS;
+        boolean isHealthy = isConnectionOpen && connectionErrorsBelowTreshold;
+        log.trace("isHealthy: {}. Based on isConectionOpen {} and connectionFailures/maxAlowed {}/{} ",
+                isHealthy, isConnectionOpen, connectionFailures, MAX_CONSECUTIVE_CLIENT_DISCONNECT_ERRORS);
+        return isHealthy;
     }
 
     @Override

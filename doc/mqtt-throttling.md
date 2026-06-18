@@ -216,7 +216,8 @@ driven by the #439 classification:
 - an **overload** outcome (`THROTTLED` / `QUOTA_EXCEEDED`, i.e. `isOverload()`) escalates the
   window: `base * 2^(consecutive-1)`, capped at max (defaults 1 s base, 60 s cap);
 - a **success** (`NONE`) resets it immediately;
-- other failures leave the window to expire on its own.
+- `FATAL` / `UNKNOWN` leave the window to expire on its own. (Persistent `TRANSIENT` failures —
+  e.g. a dropped connection — also brake; see the connection-aware back-off section below.)
 
 `AzureObservationDistributionClient.publish()` calls `applyBackpressureIfThrottled()` on the
 distributor thread before each send; when a window is active it sleeps for the remaining delay,
@@ -277,7 +278,8 @@ a successful probe closes the circuit, a failed one re-opens it.
   (`AzureDeviceClient.useNoRetryPolicy()`); on recovery the bounded policy (#440) is restored
   (`useDefaultRetryPolicy()`).
 - **`isHealthy()` now returns `false` while the circuit is open.** A short adaptive brake (#440)
-  does *not* make the client unhealthy — only a hard stop does.
+  does *not* make the client unhealthy — only a hard stop does. (A *sustained disconnect* also
+  flips `isHealthy()` without stopping sending — see the connection-aware back-off section below.)
 
 ## How to use it (for client applications)
 
@@ -296,6 +298,94 @@ Notes:
   `getNumberOfMessagesRejected()` and `isHealthy()`/`getSendStoppedReason()` and alert on them.
 - Recovery is automatic: a probe send after the cooldown closes the circuit on success.
 - Cooldowns/threshold are constants, not yet externally configurable.
+
+---
+
+# Connection-aware back-off + disconnect health — implemented
+
+A follow-up to #440/#441 closing a gap they left open. The log line
+`Cannot publish when mqtt client is disconnected` is a **transport** failure (the MQTT link
+dropped after the message was queued), not quota/throttling. The SDK reports it to our callback
+classified as `TRANSIENT` once its bounded retries (#440) are exhausted. Before this change a
+disconnect did **nothing** application-side: the throttle ignored `TRANSIENT`, the circuit never
+opened, and `isHealthy()` stayed `true` — so a sustained outage produced no brake and no alert.
+
+This step adds two things, deliberately **decoupled** from the quota/throttle circuit:
+
+1. a soft **brake** on persistent disconnects (extends #440), and
+2. an **unhealthy** signal on sustained disconnects (extends #441) — *without* stopping sending.
+
+## Soft brake on persistent transient failures (`MqttSendThrottle`)
+
+`MqttSendThrottle` now brakes on repeated `TRANSIENT` outcomes, tracked by a **separate**
+counter from the overload one:
+
+- after `DEFAULT_TRANSIENT_BACKOFF_THRESHOLD` (default **3**) consecutive `TRANSIENT` failures,
+  the back-off window engages and escalates `base * 2^(n-1)` from the threshold, capped at the
+  same 60 s ceiling;
+- an isolated blip (1–2 in a row) is tolerated — no brake;
+- a success (`NONE`) resets it immediately.
+
+The counter is **distinct from `getConsecutiveOverloads()`** on purpose: disconnect back-off
+must never be mistaken for a quota/throttle overload, and so it never feeds the circuit breaker's
+`THROTTLED` threshold. No production wiring was needed beyond the throttle itself — `publish()`
+already feeds every outcome to `recordOutcome(...)` and already calls
+`applyBackpressureIfThrottled()` before each send.
+
+## Disconnect health signal (`isHealthy()`)
+
+`isHealthy()` now also returns `false` after `MAX_CONSECUTIVE_CLIENT_DISCONNECT_ERRORS`
+(default **20**, constant in `AzureObservationDistributionClient`) consecutive disconnects:
+
+```java
+return !circuitBreaker.isOpen()
+        && sendThrottle.getConsecutiveTransientFailures() < MAX_CONSECUTIVE_CLIENT_DISCONNECT_ERRORS;
+```
+
+Crucially this is **not** a hard stop: the circuit stays closed, `isSendingStopped()` stays
+`false`, and the brake keeps retrying. Only the health flag flips, so monitoring can alert while
+the client still tries to deliver. A single successful send resets the counter and the client
+reports healthy again.
+
+| State | `isSendingStopped()` | `isHealthy()` |
+|---|:--:|:--:|
+| 1 .. (MAX-1) consecutive disconnects | `false` (still sending) | `true` |
+| ≥ MAX consecutive disconnects | `false` (still sending) | **`false`** → alert |
+| one successful send | `false` | `true` (counter reset) |
+
+### Time to alert
+
+The alert fires when the MAX-th consecutive disconnect is recorded. Each send is preceded by the
+brake set by the previous failures, so the elapsed time is the sum of those windows
+(base 1 s, doubling, 60 s cap, threshold 3):
+
+```
+(1+2+4+8+16+32) s   +   60 s * (attempts 10..20)
+   = 63 s           +   660 s
+   = 723 s  ≈ 12.0 min   (default MAX = 20)
+```
+
+Lower `MAX_CONSECUTIVE_CLIENT_DISCONNECT_ERRORS` to alert sooner — e.g. **19 → ≈ 11 min**.
+Past attempt ~10 the 60 s cap dominates, so each extra step adds a flat 60 s.
+
+## How to use it (for client applications)
+
+```java
+AzureObservationDistributionClient client = ...;
+
+client.isHealthy();                 // false after MAX consecutive disconnects (or circuit open)
+client.getConsecutiveTransientFailures(); // disconnect/transient streak; resets on success
+client.isThrottled();               // true while braking (overload OR persistent disconnect)
+```
+
+Notes:
+
+- A disconnect outage flips `isHealthy()` but **not** `isSendingStopped()` /
+  `getSendStoppedReason()` — those remain the quota/throttle (hard-stop) signals.
+- `getThrottleBackoffMillis()` and `isThrottled()` now reflect persistent-disconnect braking
+  too, not only overload.
+- Thresholds (`DEFAULT_TRANSIENT_BACKOFF_THRESHOLD`, `MAX_CONSECUTIVE_CLIENT_DISCONNECT_ERRORS`)
+  are constants, not yet externally configurable — see the config-driven follow-up (#447).
 
 ---
 
