@@ -133,6 +133,13 @@ public class AzureObservationDistributionClient implements ObservationDistributi
     }
 
     /**
+     * Helper method to re-establish stable connection to Azure IoT
+     */
+    public void pingAzureIotConnection() throws RealEstateException {
+        //FIXME
+    }
+
+    /**
      *
      * @param observationMessage
      * @throws RealEstateException
@@ -140,20 +147,8 @@ public class AzureObservationDistributionClient implements ObservationDistributi
      */
     @Override
     public void publish(ObservationMessage observationMessage) throws RealEstateException{
-        if (!isConnectionEstablished()) {
-            // Distinguish a genuinely unstable link (network down or quota exhausted) from a
-            // not-yet-opened / cleanly-closed client. On instability we stop sending and raise a
-            // typed alarm instead of inviting the distributor to retry into a dead connection.
-            if (azureDeviceClient != null && azureDeviceClient.isConnectionUnstable()) {
-                throw rejectBecauseConnectionUnstable();
-            }
-            log.warn("Connection not established, message will be queued/dropped");
-            telemetryClient.trackEvent("error-publish-observationmessage-not-connected");
-            throw new RealEstateException(
-                    "Connection to AzureDeviceClient is not established",
-                    ExceptionStatusType.RETRY_MAY_FIX_ISSUE  // ✅ RETRY_POSSIBLE i stedet!
-            );
-        }
+        //Throw Exception if connection is not established, nor is sable.
+        verifyStableConnection();
         long startTime = System.currentTimeMillis();
 //        log.info("Tracer: {}", tracer);
         Span parentSpan = tracer.spanBuilder("IotHub").startSpan();
@@ -250,6 +245,23 @@ public class AzureObservationDistributionClient implements ObservationDistributi
             parentSpan.end();
         }
 
+    }
+
+    private void verifyStableConnection() {
+        if (!isConnectionEstablished()) {
+            // Distinguish a genuinely unstable link (network down or quota exhausted) from a
+            // not-yet-opened / cleanly-closed client. On instability we stop sending and raise a
+            // typed alarm instead of inviting the distributor to retry into a dead connection.
+            if (azureDeviceClient != null && azureDeviceClient.isConnectionUnstable()) {
+                throw rejectBecauseConnectionUnstable();
+            }
+            log.warn("Connection not established, message will be queued/dropped");
+            telemetryClient.trackEvent("error-publish-observationmessage-not-connected");
+            throw new RealEstateException(
+                    "Connection to AzureDeviceClient is not established",
+                    ExceptionStatusType.RETRY_MAY_FIX_ISSUE  // ✅ RETRY_POSSIBLE i stedet!
+            );
+        }
     }
 
     @Override
