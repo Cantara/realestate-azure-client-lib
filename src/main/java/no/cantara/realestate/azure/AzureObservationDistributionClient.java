@@ -3,8 +3,6 @@ package no.cantara.realestate.azure;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.google.auto.service.AutoService;
 import com.microsoft.applicationinsights.TelemetryClient;
-import com.microsoft.applicationinsights.telemetry.Duration;
-import com.microsoft.applicationinsights.telemetry.RemoteDependencyTelemetry;
 import com.microsoft.azure.sdk.iot.device.IotHubStatusCode;
 import com.microsoft.azure.sdk.iot.device.Message;
 import com.microsoft.azure.sdk.iot.device.MessageSentCallback;
@@ -15,7 +13,6 @@ import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanKind;
 import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.api.trace.Tracer;
-import io.opentelemetry.context.Scope;
 import no.cantara.realestate.ExceptionStatusType;
 import no.cantara.realestate.RealEstateException;
 import no.cantara.realestate.azure.iot.*;
@@ -122,69 +119,68 @@ public class AzureObservationDistributionClient implements ObservationDistributi
     }
 
     /**
-     *   Message message = PnpConvention.createIotHubMessageUtf8(telemetryName, currentTemperature, componentName);
-     *         deviceClient.sendEventAsync(message, new MessageSentCallback(), message);
-     *         MessageType.DEVICE_TELEMETRY
-     *         DeviceClient#sendEventAsync(Message, MessageSentCallback, Object);
-     *         See https://github.com/Azure/azure-iot-sdk-java/blob/main/SDK%20v2%20migration%20guide.md
+     * Message message = PnpConvention.createIotHubMessageUtf8(telemetryName, currentTemperature, componentName);
+     * deviceClient.sendEventAsync(message, new MessageSentCallback(), message);
+     * MessageType.DEVICE_TELEMETRY
+     * DeviceClient#sendEventAsync(Message, MessageSentCallback, Object);
+     * See https://github.com/Azure/azure-iot-sdk-java/blob/main/SDK%20v2%20migration%20guide.md
      */
     protected void sendTelemetryMessage() {
 
     }
+
     @Override
     public void publish(ObservationMessage observationMessage) {
         if (!isConnectionEstablished()) {
             log.warn("Connection not established, message will be queued/dropped");
-            telemetryClient.trackEvent("error-publish-observationmessage-not-connected");
+            telemetryClient.trackEvent("publish-not-connected");
             throw new RealEstateException(
                     "Connection to AzureDeviceClient is not established",
                     ExceptionStatusType.RETRY_MAY_FIX_ISSUE  // ✅ RETRY_POSSIBLE i stedet!
             );
         }
-        long startTime = System.currentTimeMillis();
-//        log.info("Tracer: {}", tracer);
-        Span parentSpan = tracer.spanBuilder("IotHub").startSpan();
-        try (Scope scope = parentSpan.makeCurrent()) {
-//        Span span = tracer.spanBuilder("publishObservationmessage").setSpanKind(SpanKind.CLIENT).startSpan();
-//        span.setAttribute("destination.address", "testhostTODO");
-            telemetryClient.trackEvent("publishObservationmessage");
-            if (!isConnectionEstablished()) {
-                telemetryClient.trackEvent("error-publish-observationmessage-not-connected");
-                throw new RealEstateException("Connection to AzureDeviceClient must explicitly be opened before publishing messages.", ExceptionStatusType.RETRY_NOT_POSSIBLE);
-            }
-            if (observationMessage == null) {
-                telemetryClient.trackEvent("trace-publish-observationmessage-null");
-                log.trace("Missing observations message, not able to publish");
-                return;
-            }
-            if (!circuitBreaker.allowSend()) {
-                rejectSend(observationMessage);
-                return;
-            }
-            applyBackpressureIfThrottled();
-            boolean success = false;
-            Span childSpan = tracer.spanBuilder("SendTelemetry").setSpanKind(SpanKind.CLIENT).startSpan();
-            childSpan.setAttribute("appName", "IoTHubClient");
-            childSpan.setAttribute("server.address", "cludconnectorhub-test-west.azure-devices.net");
-            childSpan.setAttribute("http.method", "GET");
-            childSpan.setAttribute("http.url", "https://cludconnectorhub-test-west.azure-devices.net/");
 
-            try(Scope childScope = childSpan.makeCurrent()) {
-//            try (Scope ignored = span.makeCurrent()) {
-                log.trace("Publishing observationMessage: {}", observationMessage);
-                Message telemetryMessage = buildTelemetryMessage(observationMessage);
-                log.trace("Built AzureMessage from observationMessage: {}, with body: {}", telemetryMessage, new String(telemetryMessage.getBytes(),StandardCharsets.UTF_8));
-                String messageId = telemetryMessage.getMessageId();
-                messagesAwaitingSentAck.put(messageId, observationMessage);
-                log.trace("Try to send to Azure IoT Hub: {}", observationMessage);
-                azureDeviceClient.sendEventAsync(telemetryMessage, new MessageSentCallback() {
-                    @Override
-                    public void onMessageSent(Message sentMessage, IotHubClientException iotHubClientException, Object callbackContext) {
+        applyBackpressureIfThrottled();
+        telemetryClient.trackEvent("publish-attempt");
+
+        try {
+            log.trace("Publishing observationMessage: {}", observationMessage);
+            Message telemetryMessage = buildTelemetryMessage(observationMessage);
+            log.trace("Built AzureMessage from observationMessage: {}, with body: {}", telemetryMessage, new String(telemetryMessage.getBytes(), StandardCharsets.UTF_8));
+            String messageId = telemetryMessage.getMessageId();
+            messagesAwaitingSentAck.put(messageId, observationMessage);
+            log.trace("Try to send to Azure IoT Hub: {}", observationMessage);
+            Span span = tracer.spanBuilder("iot.send").setSpanKind(SpanKind.PRODUCER).startSpan();
+            azureDeviceClient.sendEventAsync(telemetryMessage, new MessageSentCallback() {
+                @Override
+                public void onMessageSent(Message sentMessage, IotHubClientException iotHubClientException, Object callbackContext) {
+                    try {
                         if (iotHubClientException != null) {
                             log.trace("Received Error when sening message to to Azure IoT Hub: {}, Exception: {}", sentMessage, iotHubClientException);
+                            MqttSendFailureType failureType = registerFailure(iotHubClientException, observationMessage);
+                            telemetryClient.trackEvent("publish-failed-" + failureType.name());
+                            span.setStatus(StatusCode.ERROR, iotHubClientException.getMessage());
+                            span.recordException(iotHubClientException);
                         } else {
                             log.trace("Message is sent to Azure IoT Hub: {}", sentMessage);
+                            addMessagesPublished();
+                            registerSuccess();
+                            span.setStatus(StatusCode.OK);
                         }
+                        messageSent(sentMessage);
+                    } finally {
+                        span.end();
+                    }
+                }
+            });
+            addMessagesObserved();
+
+        } catch (JsonProcessingException e) {
+            log.debug("Failed to parse message: {}", observationMessage, e);
+            throw new RuntimeException("Failed to parse observation message", e);
+        }
+        /*
+
                         Message msg = (Message) callbackContext;
                         long elapsedTime = System.currentTimeMillis() - startTime;
                         Duration duration = new Duration(elapsedTime);
@@ -218,25 +214,10 @@ public class AzureObservationDistributionClient implements ObservationDistributi
                 });
                 addMessagesObserved();
                 success = true;
-            } catch (JsonProcessingException e) {
-                log.debug("Failed to parse message: {}", observationMessage, e);
-                childSpan.recordException(e);
-                childSpan.setStatus(StatusCode.ERROR, e.getMessage());
-                childSpan.setAttribute("http.response.status_code", "500");
-                childSpan.addEvent("Failed to parse message: " + observationMessage);
-                throw new RuntimeException(e);
-            } finally {
-                childSpan.end();
-                RemoteDependencyTelemetry telemetry = new RemoteDependencyTelemetry();
-                telemetry.setSuccess(success);
-                telemetry.setTimestamp(new Date(startTime));
-                telemetryClient.trackDependency(telemetry);
-            }
-        } finally {
-            parentSpan.end();
-        }
 
+                 */
     }
+
 
     @Override
     public boolean isInitialized() {
@@ -365,6 +346,7 @@ public class AzureObservationDistributionClient implements ObservationDistributi
             numberOfMessagesObserved = 1;
         }
     }
+
     synchronized void addMessagesPublished() {
         if (numberOfMessagesPublished < Long.MAX_VALUE) {
             numberOfMessagesPublished++;
@@ -372,6 +354,7 @@ public class AzureObservationDistributionClient implements ObservationDistributi
             numberOfMessagesPublished = 1;
         }
     }
+
     synchronized void addMessagesFailed() {
         if (numberOfMessagesFailed < Long.MAX_VALUE) {
             numberOfMessagesFailed++;
