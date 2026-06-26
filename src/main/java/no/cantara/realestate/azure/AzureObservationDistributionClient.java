@@ -140,6 +140,15 @@ public class AzureObservationDistributionClient implements ObservationDistributi
             );
         }
 
+        if (observationMessage == null) {
+            log.trace("Missing observations message, not able to publish");
+            return;
+        }
+        if (!circuitBreaker.allowSend()) {
+            rejectSend(observationMessage);
+            return;
+        }
+
         applyBackpressureIfThrottled();
         telemetryClient.trackEvent("publish-attempt");
 
