@@ -71,7 +71,7 @@ public class AzureObservationDistributionClient implements ObservationDistributi
     /*
     Intended used for testing.
      */
-    public AzureObservationDistributionClient(AzureDeviceClient azureDeviceClient) {
+    protected AzureObservationDistributionClient(AzureDeviceClient azureDeviceClient) {
         tracer = GlobalOpenTelemetry.getTracer("OTEL.AzureMonitor.AzureObservationDistributionClient");
         telemetryClient = new TelemetryClient();
         this.azureDeviceClient = azureDeviceClient;
@@ -81,7 +81,7 @@ public class AzureObservationDistributionClient implements ObservationDistributi
     /*
     Intended used for test client
      */
-    public AzureObservationDistributionClient(AzureDeviceClient azureDeviceClient, String connectionString) {
+    protected AzureObservationDistributionClient(AzureDeviceClient azureDeviceClient, String connectionString) {
         tracer = GlobalOpenTelemetry.getTracer("OTEL.AzureMonitor.AzureObservationDistributionClient");
         telemetryClient = new TelemetryClient();
         this.azureDeviceClient = azureDeviceClient != null ? azureDeviceClient : new AzureDeviceClient(connectionString);
