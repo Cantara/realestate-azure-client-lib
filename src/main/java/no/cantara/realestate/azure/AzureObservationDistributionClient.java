@@ -130,7 +130,7 @@ public class AzureObservationDistributionClient implements ObservationDistributi
     }
 
     @Override
-    public void publish(ObservationMessage observationMessage) {
+    public void publish(ObservationMessage observationMessage) throws RealEstateException {
         if (!isConnectionEstablished()) {
             log.warn("Connection not established, message will be queued/dropped");
             telemetryClient.trackEvent("publish-not-connected");
@@ -186,45 +186,9 @@ public class AzureObservationDistributionClient implements ObservationDistributi
 
         } catch (JsonProcessingException e) {
             log.debug("Failed to parse message: {}", observationMessage, e);
-            throw new RuntimeException("Failed to parse observation message", e);
+            throw new RealEstateException("Failed to parse observation message", e, ExceptionStatusType.data_error);
         }
-        /*
 
-                        Message msg = (Message) callbackContext;
-                        long elapsedTime = System.currentTimeMillis() - startTime;
-                        Duration duration = new Duration(elapsedTime);
-                        RemoteDependencyTelemetry dependencyTelemetry = new RemoteDependencyTelemetry("IotHub", "SendEventAsync", duration, true);
-                        dependencyTelemetry.setTarget("IotHubNorway.messom.no");
-                        dependencyTelemetry.setType("PC"); //--> Device_Type=PC, need Client_Type=PC
-                        //koble denne målingen til en eller annen "parent"
-
-                        if (iotHubClientException != null) {
-                            MqttSendFailureType failureType = registerFailure(iotHubClientException, observationMessage);
-                            dependencyTelemetry.setSuccess(false);
-                            childSpan.setStatus(StatusCode.ERROR, iotHubClientException.getMessage());
-                            childSpan.setAttribute("http.response.status_code", "500");
-                            childSpan.setAttribute("mqtt.failure.type", failureType.name());
-                            childSpan.setAttribute("iothub.status_code", String.valueOf(iotHubClientException.getStatusCode()));
-                            childSpan.addEvent("Failed to send message");
-                            childSpan.recordException(iotHubClientException);
-                            telemetryClient.trackEvent("error-publish-observationmessage-" + failureType.name());
-                        } else {
-                            //telemetryClient.TrackDependency("myDependencyType", "myDependencyCall", "myDependencyData",  startTime, timer.Elapsed, success);
-                            log.debug("Message sent: {}", sentMessage);
-                            childSpan.setStatus(StatusCode.OK, "Message sent");
-                            childSpan.setAttribute("http.response.status_code", "200");
-                            childSpan.addEvent("Message sent");
-                            addMessagesPublished();
-                            registerSuccess();
-                        }
-                        log.debug("Observation - Response from IoT Hub: message Id={}, status={}", msg.getMessageId(), iotHubClientException == null ? OK : iotHubClientException.getStatusCode());
-                        messageSent(sentMessage);
-                    }
-                });
-                addMessagesObserved();
-                success = true;
-
-                 */
     }
 
 
