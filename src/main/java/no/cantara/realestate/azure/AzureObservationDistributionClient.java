@@ -131,9 +131,22 @@ public class AzureObservationDistributionClient implements ObservationDistributi
     protected void sendTelemetryMessage() {
 
     }
+
+    /**
+     *
+     * @param observationMessage
+     * @throws RealEstateException
+     *
+     */
     @Override
-    public void publish(ObservationMessage observationMessage) {
+    public void publish(ObservationMessage observationMessage) throws RealEstateException{
         if (!isConnectionEstablished()) {
+            // Distinguish a genuinely unstable link (network down or quota exhausted) from a
+            // not-yet-opened / cleanly-closed client. On instability we stop sending and raise a
+            // typed alarm instead of inviting the distributor to retry into a dead connection.
+            if (azureDeviceClient != null && azureDeviceClient.isConnectionUnstable()) {
+                throw rejectBecauseConnectionUnstable();
+            }
             log.warn("Connection not established, message will be queued/dropped");
             telemetryClient.trackEvent("error-publish-observationmessage-not-connected");
             throw new RealEstateException(
@@ -186,6 +199,7 @@ public class AzureObservationDistributionClient implements ObservationDistributi
                             log.trace("Message is sent to Azure IoT Hub: {}", sentMessage);
                         }
                         Message msg = (Message) callbackContext;
+                        //TODO when needed String originalObservationJson = new String(msg.getBytes(), StandardCharsets.UTF_8);
                         long elapsedTime = System.currentTimeMillis() - startTime;
                         Duration duration = new Duration(elapsedTime);
                         RemoteDependencyTelemetry dependencyTelemetry = new RemoteDependencyTelemetry("IotHub", "SendEventAsync", duration, true);
@@ -262,9 +276,12 @@ public class AzureObservationDistributionClient implements ObservationDistributi
         boolean isConnectionOpen = !circuitBreaker.isOpen();
         int connectionFailures = sendThrottle.getConsecutiveTransientFailures();
         boolean connectionErrorsBelowTreshold = connectionFailures <= MAX_CONSECUTIVE_CLIENT_DISCONNECT_ERRORS;
-        boolean isHealthy = isConnectionOpen && connectionErrorsBelowTreshold;
-        log.trace("isHealthy: {}. Based on isConectionOpen {} and connectionFailures/maxAlowed {}/{} ",
-                isHealthy, isConnectionOpen, connectionFailures, MAX_CONSECUTIVE_CLIENT_DISCONNECT_ERRORS);
+        // The MQTT link being unstable — or force-closed to break a reconnect loop (#1805) — reports
+        // unhealthy. This is the signal a reopen-watchdog acts on to bring the connection back.
+        boolean linkStable = azureDeviceClient == null || !azureDeviceClient.isConnectionUnstable();
+        boolean isHealthy = isConnectionOpen && connectionErrorsBelowTreshold && linkStable;
+        log.trace("isHealthy: {}. Based on isConectionOpen {}, connectionFailures/maxAlowed {}/{}, linkStable {} ",
+                isHealthy, isConnectionOpen, connectionFailures, MAX_CONSECUTIVE_CLIENT_DISCONNECT_ERRORS, linkStable);
         return isHealthy;
     }
 
@@ -417,6 +434,12 @@ public class AzureObservationDistributionClient implements ObservationDistributi
                 log.error("Azure IoT Hub permanent send failure: retrying will not help, message should be dropped. " +
                         "statusCode={}, observationMessage={}", statusCode, observationMessage, exception);
                 break;
+            case UNDELIVERABLE:
+                log.error("Azure IoT Hub message UNDELIVERABLE: the message was dropped without delivery " +
+                        "(connection closed/expired before ack). When sending is already stopped this confirms the " +
+                        "network is down or the device quota is exhausted — alert an administrator. " +
+                        "statusCode={}, observationMessage={}", statusCode, observationMessage, exception);
+                break;
             case TRANSIENT:
                 log.warn("Azure IoT Hub transient send failure: safe to retry after a delay. " +
                         "statusCode={}, observationMessage={}", statusCode, observationMessage, exception);
@@ -512,6 +535,23 @@ public class AzureObservationDistributionClient implements ObservationDistributi
         telemetryClient.trackEvent("error-publish-observationmessage-circuit-open");
         log.debug("MQTT send circuit OPEN (reason={}); rejecting observationMessage. Rejected total={}",
                 circuitBreaker.getOpenReason(), numberOfMessagesRejected);
+    }
+
+    /**
+     * Reject a new send because the MQTT link is unstable (#1805): count the rejection and build the
+     * typed {@link IotHubConnectionUnstableException} the caller throws, so an administrator can be
+     * alerted that the network is down or the device quota is exhausted. The message is not buffered
+     * — firing it into a dead connection only feeds the reconnect loop we are trying to break.
+     */
+    private IotHubConnectionUnstableException rejectBecauseConnectionUnstable() {
+        addMessagesRejected();
+        telemetryClient.trackEvent("error-publish-observationmessage-connection-unstable");
+        IotHubConnectionUnstableException exception = new IotHubConnectionUnstableException(
+                azureDeviceClient.getConnectionStatus(),
+                azureDeviceClient.getConnectionStatusReason(),
+                azureDeviceClient.getConnectionRetryingForMillis());
+        log.error("Rejecting publish — {} Rejected total={}", exception.getMessage(), numberOfMessagesRejected);
+        return exception;
     }
 
     /**

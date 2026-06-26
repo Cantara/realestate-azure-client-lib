@@ -57,9 +57,14 @@ public final class MqttSendFailureClassifier {
             case INTERNAL_SERVER_ERROR:
             case IO_ERROR:
             case DEVICE_OPERATION_TIMED_OUT:
+                return MqttSendFailureType.TRANSIENT;
+
+            // The message is gone — the connection went away underneath it. Resending the same
+            // payload is pointless; when sending is already stopped this confirms a dead link
+            // (network down or quota exhausted). See MqttSendFailureType.UNDELIVERABLE.
             case MESSAGE_EXPIRED:
             case MESSAGE_CANCELLED_ONCLOSE:
-                return MqttSendFailureType.TRANSIENT;
+                return MqttSendFailureType.UNDELIVERABLE;
 
             // Permanent — retrying will not help; drop the message.
             case BAD_FORMAT:
