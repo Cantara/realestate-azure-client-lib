@@ -547,16 +547,29 @@ public class AzureObservationDistributionClient implements ObservationDistributi
     }
 
     /**
-     * @return {@code true} if new sends are currently being rejected because IoT Hub is overloaded
-     * (the send circuit is open). Mirrors {@code !isHealthy()}.
+     * @return {@code true} if {@link #publish(ObservationMessage)} is currently rejecting new sends.
+     * This is the case when either source has stopped sending:
+     * <ul>
+     *     <li>the send circuit is open because IoT Hub is overloaded (#441 — {@code QUOTA_EXCEEDED}
+     *     or persistent {@code THROTTLED}); or</li>
+     *     <li>the MQTT link is unstable / force-closed to break a reconnect loop (#1805), in which
+     *     case {@code publish} throws {@link IotHubConnectionUnstableException}.</li>
+     * </ul>
+     * Exposed as a single predicate so external callers do not have to know which source stopped
+     * sending — the intent is that "someone" can poll this and, when {@code true}, ping/reopen the
+     * connection to recover. Today the circuit-breaker source is the only one that reopens on its own.
      */
     public boolean isSendingStopped() {
-        return circuitBreaker.isOpen();
+        boolean linkUnstable = azureDeviceClient != null && azureDeviceClient.isConnectionUnstable();
+        return circuitBreaker.isOpen() || linkUnstable;
     }
 
     /**
-     * @return the failure category that stopped sending ({@code QUOTA_EXCEEDED} or {@code THROTTLED}),
-     * or {@code null} if sending is not stopped.
+     * @return the IoT Hub overload category that opened the send circuit ({@code QUOTA_EXCEEDED} or
+     * {@code THROTTLED}), or {@code null} when sending is not stopped by the circuit. Note that a
+     * stop caused by an <em>unstable link</em> (#1805) has no {@link MqttSendFailureType} — the cause
+     * cannot be determined from the client side — so this returns {@code null} even though
+     * {@link #isSendingStopped()} is {@code true}; inspect the link status for that case.
      */
     public MqttSendFailureType getSendStoppedReason() {
         return circuitBreaker.getOpenReason();

@@ -57,6 +57,16 @@ class AzureObservationDistributionClientUnstableLinkTest {
         assertEquals(1, distributionClient.getNumberOfMessagesRejected());
         // The link being unstable is surfaced as unhealthy for the reopen-watchdog.
         assertFalse(distributionClient.isHealthy());
+        // ...and as a single "sending stopped" signal, regardless of which source stopped it, so an
+        // external caller can poll this and reopen the connection without knowing the internals.
+        assertTrue(distributionClient.isSendingStopped());
+    }
+
+    @Test
+    void stableLink_sendingNotStopped() {
+        when(azureDeviceClient.isConnectionUnstable()).thenReturn(false);
+
+        assertFalse(distributionClient.isSendingStopped());
     }
 
     @Test
