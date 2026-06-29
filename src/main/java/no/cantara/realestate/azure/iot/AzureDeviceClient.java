@@ -3,6 +3,7 @@ package no.cantara.realestate.azure.iot;
 import com.microsoft.azure.sdk.iot.device.*;
 import com.microsoft.azure.sdk.iot.device.exceptions.IotHubClientException;
 import com.microsoft.azure.sdk.iot.device.transport.ExponentialBackoffWithJitter;
+import com.microsoft.azure.sdk.iot.device.transport.IotHubConnectionStatus;
 import com.microsoft.azure.sdk.iot.device.transport.NoRetry;
 import com.microsoft.azure.sdk.iot.device.transport.RetryPolicy;
 import io.opentelemetry.api.GlobalOpenTelemetry;
@@ -12,6 +13,8 @@ import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.semconv.trace.attributes.SemanticAttributes;
 import org.slf4j.Logger;
+
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static no.cantara.realestate.azure.metrics.MetricsConfig.INSTRUMENTATION_SCOPE_NAME;
 import static org.slf4j.LoggerFactory.getLogger;
@@ -31,7 +34,13 @@ public class AzureDeviceClient {
     private final DeviceClient deviceClient;
     private final Tracer tracer;
 
-    private boolean connectionEstablished = false;
+    // Tracks the real MQTT link state from the SDK's connection-status callback and decides when a
+    // silent reconnect loop must be broken by force-closing the client (azure-iot-sdk-java#1805).
+    private final IotHubConnectionMonitor connectionMonitor;
+    // Guards the force-close so it runs at most once per instability episode.
+    private final AtomicBoolean closing = new AtomicBoolean(false);
+
+    private volatile boolean connectionEstablished = false;
     private boolean retryConnection;
     private String iotHubHostname = "";
 
@@ -41,7 +50,9 @@ public class AzureDeviceClient {
         if (deviceClient != null && deviceClient.getConfig() != null) {
             iotHubHostname = deviceClient.getConfig().getIotHubHostname();
         }
+        this.connectionMonitor = new IotHubConnectionMonitor();
         applyBoundedRetryPolicy();
+        registerConnectionStatusCallback();
         tracer = GlobalOpenTelemetry.getTracer(INSTRUMENTATION_SCOPE_NAME);
     }
 
@@ -49,12 +60,107 @@ public class AzureDeviceClient {
         Intended for testing
          */
     protected AzureDeviceClient(DeviceClient deviceClient) {
+        this(deviceClient, new IotHubConnectionMonitor());
+    }
+
+    /*
+        Intended for testing — inject a connection monitor with a deterministic clock / short budget.
+         */
+    AzureDeviceClient(DeviceClient deviceClient, IotHubConnectionMonitor connectionMonitor) {
         this.deviceClient = deviceClient;
         if (deviceClient != null && deviceClient.getConfig() != null) {
             iotHubHostname = deviceClient.getConfig().getIotHubHostname();
         }
+        this.connectionMonitor = connectionMonitor;
         applyBoundedRetryPolicy();
+        registerConnectionStatusCallback();
         tracer = GlobalOpenTelemetry.getTracer(INSTRUMENTATION_SCOPE_NAME);
+    }
+
+    /**
+     * Re-check whether the reconnect loop should be broken, and force-close if so. Driven entirely by
+     * the SDK's connection-status callback: the SDK re-fires {@code DISCONNECTED_RETRYING} on each
+     * reconnect attempt, and the monitor measures elapsed time from the first one — so by the time a
+     * later attempt arrives past the retry budget, this closes the client. {@code RETRY_EXPIRED}
+     * (the SDK giving up) triggers it immediately. Package-private for testing.
+     */
+    void evaluateForceClose() {
+        try {
+            if (connectionMonitor.shouldForceClose()) {
+                forceCloseDueToInstability();
+            }
+        } catch (Exception e) {
+            log.error("IoT Hub force-close evaluation failed", e);
+        }
+    }
+
+    /**
+     * Subscribe to the SDK's connection-status changes. This is the only channel that surfaces a
+     * dropped MQTT link and the SDK's internal reconnect attempts — the per-message send callback
+     * never sees them (azure-iot-sdk-java#1805).
+     */
+    private void registerConnectionStatusCallback() {
+        if (deviceClient == null) {
+            return;
+        }
+        deviceClient.setConnectionStatusChangeCallback(
+                context -> handleConnectionStatusChange(
+                        context.getNewStatus(), context.getNewStatusReason(), context.getCause()),
+                null);
+    }
+
+    /**
+     * Handle one connection-status transition: update the link state, mirror it onto
+     * {@link #connectionEstablished}, and force-close the client if the monitor decides the reconnect
+     * loop is no longer expected to recover.
+     *
+     * <p>Package-private so the decision wiring can be driven from a unit test without a live SDK.
+     */
+    void handleConnectionStatusChange(IotHubConnectionStatus newStatus,
+                                      com.microsoft.azure.sdk.iot.device.IotHubConnectionStatusChangeReason newReason,
+                                      Throwable newCause) {
+        connectionMonitor.recordStatusChange(newStatus, newReason, newCause);
+        connectionEstablished = newStatus == IotHubConnectionStatus.CONNECTED;
+        if (newStatus == IotHubConnectionStatus.CONNECTED) {
+            log.info("IoT Hub connection status: CONNECTED (reason={})", newReason);
+        } else {
+            if (newStatus == IotHubConnectionStatus.DISCONNECTED_RETRYING) {
+                log.debug("IoT Hub connection status: {} (reason={}, cause={})", newStatus, newReason,
+                        newCause == null ? "none" : newCause.toString());
+            } else {
+                log.warn("IoT Hub connection status: {} (reason={}, cause={})", newStatus, newReason,
+                        newCause == null ? "none" : newCause.toString());
+            }
+        }
+        // Re-evaluate on every status change. RETRY_EXPIRED closes immediately; for a persistent
+        // DISCONNECTED_RETRYING the SDK re-fires this callback on each reconnect attempt, and the
+        // monitor closes once the elapsed time from the first attempt passes the retry budget.
+        evaluateForceClose();
+    }
+
+    /**
+     * Force-close the client to stop the SDK's reconnect threads. The SDK will not stop them on its
+     * own; {@code close()} is the only lever. It must run off the callback thread — {@code close()}
+     * joins on the very SDK threads that invoke the status callback, so calling it inline deadlocks.
+     */
+    private void forceCloseDueToInstability() {
+        if (!closing.compareAndSet(false, true)) {
+            return;
+        }
+        connectionMonitor.markClosedDueToInstability();
+        Thread closer = new Thread(() -> {
+            try {
+                log.warn("Force-closing IoT Hub client to break the reconnect loop (status={}, reason={}).",
+                        connectionMonitor.getStatus(), connectionMonitor.getReason());
+                closeConnection();
+            } catch (Exception e) {
+                log.error("Failed to force-close IoT Hub client after detected instability", e);
+            } finally {
+                closing.set(false);
+            }
+        }, "iothub-instability-closer");
+        closer.setDaemon(true);
+        closer.start();
     }
 
     /**
@@ -163,6 +269,39 @@ public class AzureDeviceClient {
 
     public boolean isConnectionEstablished() {
         return connectionEstablished;
+    }
+
+    /**
+     * @return {@code true} when sending should be treated as stopped because the MQTT link is
+     * unstable (retrying / disconnected with an error) or the client has been force-closed to break
+     * a reconnect loop. A clean, intended close is not reported as unstable.
+     */
+    public boolean isConnectionUnstable() {
+        return connectionMonitor.isConnectionUnstableOrStopped();
+    }
+
+    /** @return the last connection status reported by the SDK. */
+    public IotHubConnectionStatus getConnectionStatus() {
+        return connectionMonitor.getStatus();
+    }
+
+    /** @return the reason behind the last connection-status change, or {@code null} if none yet. */
+    public com.microsoft.azure.sdk.iot.device.IotHubConnectionStatusChangeReason getConnectionStatusReason() {
+        return connectionMonitor.getReason();
+    }
+
+    /** @return how long the link has been retrying to reconnect, in ms, or {@code 0} if not retrying. */
+    public long getConnectionRetryingForMillis() {
+        return connectionMonitor.getRetryingForMillis();
+    }
+
+    /**
+     * Notify the monitor that a message was delivered successfully. Proves the link is alive, so it
+     * clears the retry clock — the same effect as a {@code CONNECTED} event — and prevents a stale
+     * retrying window from accumulating toward a force-close.
+     */
+    public void notifyMessageDelivered() {
+        connectionMonitor.recordSuccessfulSend();
     }
 
     public static void main(String[] args) {

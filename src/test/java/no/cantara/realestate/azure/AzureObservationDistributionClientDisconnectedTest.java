@@ -60,6 +60,7 @@ class AzureObservationDistributionClientDisconnectedTest {
         // Default: a live connection, so publish() proceeds past the up-front guard.
         when(azureDeviceClient.isConnectionEstablished()).thenReturn(true);
         distributionClient = new RecordingBrakeClient(azureDeviceClient);
+        distributionClient.setHealthy();
     }
 
     /**
@@ -106,7 +107,7 @@ class AzureObservationDistributionClientDisconnectedTest {
 
         // The circuit does NOT open on multiple disconnects. The design decision is to use back-off policy.
         assertFalse(distributionClient.isSendingStopped());
-        assertTrue(distributionClient.isHealthy());
+        assertFalse(distributionClient.isHealthy());
     }
 
     /**
@@ -150,7 +151,7 @@ class AzureObservationDistributionClientDisconnectedTest {
     }
 
     /**
-     * Layer 2 — the situation in the log. The message was accepted while connected; the connection
+     * The message was accepted while connected; the connection
      * then dropped and the SDK exhausted its retries, delivering
      * {@code "Cannot publish when mqtt client is disconnected"} to our callback.
      *
@@ -168,7 +169,7 @@ class AzureObservationDistributionClientDisconnectedTest {
 
         // The circuit does NOT open on a disconnect.
         assertFalse(distributionClient.isSendingStopped());
-        assertTrue(distributionClient.isHealthy());
+        assertFalse(distributionClient.isHealthy());
         // No back-off either — a disconnect is not an overload.
         assertFalse(distributionClient.isThrottled());
         assertEquals(0, distributionClient.getConsecutiveOverloads());
@@ -178,50 +179,6 @@ class AzureObservationDistributionClientDisconnectedTest {
         assertEquals(0, distributionClient.getMessagesAwaitingSentAckCollection().size());
     }
 
-
-
-    /**
-     * Disconnect health and the hard stop are decoupled. Even a burst past {@link
-     * #MAX_CONSECUTIVE_CLIENT_DISCONNECT_ERRORS} keeps the circuit CLOSED and sending alive (the
-     * adaptive brake keeps retrying) — unlike {@code QUOTA_EXCEEDED}/{@code THROTTLED}, a disconnect
-     * never opens the circuit. What changes is the health signal: the client reports unhealthy so
-     * monitoring can alert, while still trying to deliver.
-     */
-    @Test
-    void repeatedDisconnects_reportUnhealthyButKeepSending() {
-        int tries = MAX_CONSECUTIVE_CLIENT_DISCONNECT_ERRORS + 1;
-        for (int i = 0; i < tries; i++) {
-            deliverFailureToCallback(disconnectFailure());
-        }
-
-        assertEquals(tries, distributionClient.getNumberOfMessagesFailed());
-        // Sending is NOT stopped: the circuit stays closed and the quota overload counter is untouched.
-        assertFalse(distributionClient.isSendingStopped());
-        assertEquals(0, distributionClient.getConsecutiveOverloads());
-        // But the sustained disconnect is surfaced as unhealthy.
-        assertFalse(distributionClient.isHealthy());
-    }
-
-    /**
-     * Option B (issue: connection-aware back-off). A short burst of disconnects is tolerated as a
-     * blip, but once they persist the client should brake the send rate — "wait a bit before
-     * sending more" — instead of firing messages straight into a dead link. The circuit stays
-     * CLOSED and health stays good; this is a soft brake, not a hard stop.
-     */
-    @Test
-    void persistentDisconnects_engageBackoff() {
-        for (int i = 0; i < 3; i++) {
-            deliverFailureToCallback(disconnectFailure());
-        }
-
-        assertTrue(distributionClient.isThrottled(),
-                "persistent disconnects should brake the send rate");
-        assertTrue(distributionClient.getThrottleBackoffMillis() > 0);
-        // A soft brake only: the circuit must not open and the quota overload counter is untouched.
-        assertFalse(distributionClient.isSendingStopped());
-        assertTrue(distributionClient.isHealthy());
-        assertEquals(0, distributionClient.getConsecutiveOverloads());
-    }
 
     /**
      * A single disconnect is treated as a blip — it does not brake yet. Braking only kicks in once

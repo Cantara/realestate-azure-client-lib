@@ -40,6 +40,14 @@ class MqttSendFailureClassifierTest {
     }
 
     @Test
+    void cancelledOnCloseAndExpiredAreUndeliverable() {
+        // The message went away with the connection — not a retry candidate. Seeing this while
+        // sending is stopped confirms a dead link (network down or quota exhausted).
+        assertEquals(MqttSendFailureType.UNDELIVERABLE, MqttSendFailureClassifier.classify(IotHubStatusCode.MESSAGE_CANCELLED_ONCLOSE));
+        assertEquals(MqttSendFailureType.UNDELIVERABLE, MqttSendFailureClassifier.classify(IotHubStatusCode.MESSAGE_EXPIRED));
+    }
+
+    @Test
     void clientErrorsAreFatal() {
         assertEquals(MqttSendFailureType.FATAL, MqttSendFailureClassifier.classify(IotHubStatusCode.BAD_FORMAT));
         assertEquals(MqttSendFailureType.FATAL, MqttSendFailureClassifier.classify(IotHubStatusCode.UNAUTHORIZED));
@@ -67,5 +75,7 @@ class MqttSendFailureClassifierTest {
         assertTrue(MqttSendFailureType.TRANSIENT.isRetryable());
         assertFalse(MqttSendFailureType.QUOTA_EXCEEDED.isRetryable(), "retrying a quota failure makes the self-DoS worse");
         assertFalse(MqttSendFailureType.FATAL.isRetryable());
+        assertFalse(MqttSendFailureType.UNDELIVERABLE.isRetryable(), "an undeliverable message is gone — resending the same payload is pointless");
+        assertFalse(MqttSendFailureType.UNDELIVERABLE.isOverload());
     }
 }

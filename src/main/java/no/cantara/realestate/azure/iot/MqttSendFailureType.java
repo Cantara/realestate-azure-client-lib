@@ -45,6 +45,17 @@ public enum MqttSendFailureType {
      */
     FATAL,
 
+    /**
+     * The message was dropped without ever being delivered because the client connection went away
+     * underneath it ({@code MESSAGE_CANCELLED_ONCLOSE} when the client closed,
+     * {@code MESSAGE_EXPIRED} when the SDK gave up retrying). The message is <strong>gone</strong> —
+     * resending the same payload is pointless. Crucially, seeing this <em>while sending is already
+     * stopped</em> (link unstable / force-closed) is the confirmation that the network is down or the
+     * device quota is exhausted, and is the trigger for alerting an administrator. Distinct from
+     * {@link #TRANSIENT} (which invites a retry) and from {@link #FATAL} (a bad message, not a dead link).
+     */
+    UNDELIVERABLE,
+
     /** The status code was missing or not recognised by this classifier. Treat conservatively. */
     UNKNOWN;
 

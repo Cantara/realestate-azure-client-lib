@@ -1,8 +1,8 @@
-package no.cantara.realestate.azure.iot;
+package no.cantara.realestate.azure;
 
 import com.microsoft.azure.sdk.iot.device.IotHubClientProtocol;
 import no.cantara.config.ApplicationProperties;
-import no.cantara.realestate.azure.AzureObservationDistributionClient;
+import no.cantara.realestate.azure.iot.AzureDeviceClient;
 import no.cantara.realestate.observations.ObservationMessage;
 import no.cantara.realestate.observations.ObservationMessageBuilder;
 import org.slf4j.Logger;
