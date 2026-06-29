@@ -14,6 +14,7 @@ import io.opentelemetry.api.trace.SpanKind;
 import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.api.trace.Tracer;
 import no.cantara.realestate.ExceptionStatusType;
+import no.cantara.realestate.MqttUnavailableException;
 import no.cantara.realestate.RealEstateException;
 import no.cantara.realestate.azure.iot.*;
 import no.cantara.realestate.azure.rec.RecObservationMessage;
@@ -130,14 +131,9 @@ public class AzureObservationDistributionClient implements ObservationDistributi
     }
 
 
-    /**
-     * @param observationMessage the observation to publish
-     * @throws RealEstateException if the connection is not established/stable, or the message cannot be built
-     * @throws AzureIotHubConnectionUnstableException if the connection is not established or unstable. Dayly Quota limit reached may also be the cause.
-     * The client should call close on the AzureObservationDistributionClient when receiving this Exception. Then restart the client to re-establish connection to Azure IoT Hub.
-     */
+
     @Override
-    public void publish(ObservationMessage observationMessage) throws RealEstateException, AzureIotHubConnectionUnstableException {
+    public void publish(ObservationMessage observationMessage) throws RealEstateException, MqttUnavailableException {
         // Throw a typed exception if the connection is not established, nor stable (#1805).
         verifyStableConnection();
 
@@ -195,22 +191,33 @@ public class AzureObservationDistributionClient implements ObservationDistributi
     /**
      *
      * @throws RealEstateException if Connection to AzureDeviceClient is not established
-     * @throws AzureIotHubConnectionUnstableException if the connection is not established or unstable
+     * @throws MqttUnavailableException if the connection is not established or unstable
      */
     protected void verifyStableConnection() throws RealEstateException {
+        if (azureDeviceClient == null) {
+            throw new RealEstateException("Azure device client is not initialized", ExceptionStatusType.RETRY_NOT_POSSIBLE);
+        }
         if (!isConnectionEstablished()) {
             // Distinguish a genuinely unstable link (network down or quota exhausted) from a
             // not-yet-opened / cleanly-closed client. On instability we stop sending and raise a
             // typed alarm instead of inviting the distributor to retry into a dead connection.
-            if (azureDeviceClient != null && azureDeviceClient.isConnectionUnstable()) {
-                throw rejectBecauseConnectionUnstable();
+            if ( azureDeviceClient.isConnectionUnstable()) {
+                addMessagesRejected();
+                telemetryClient.trackEvent("error-publish-observationmessage-connection-unstable");
+                AzureIotHubConnectionUnstableException exception = new AzureIotHubConnectionUnstableException(
+                        azureDeviceClient.getConnectionStatus(),
+                        azureDeviceClient.getConnectionStatusReason(),
+                        azureDeviceClient.getConnectionRetryingForMillis());
+                log.error("Rejecting publish — {} Rejected total={}", exception.getMessage(), numberOfMessagesRejected);
+                throw new MqttUnavailableException("Connection to AzureDeviceClient is unstable. Client should call closeConnection(), wait and re-connect: " + exception.getMessage(), exception, ExceptionStatusType.RETRY_NOT_POSSIBLE);
+            } else {
+                log.warn("Connection not established, message will be queued/dropped");
+                telemetryClient.trackEvent("publish-not-connected");
+                throw new RealEstateException(
+                        "Connection to AzureDeviceClient is not established",
+                        ExceptionStatusType.RETRY_MAY_FIX_ISSUE  // ✅ RETRY_POSSIBLE i stedet!
+                );
             }
-            log.warn("Connection not established, message will be queued/dropped");
-            telemetryClient.trackEvent("publish-not-connected");
-            throw new RealEstateException(
-                    "Connection to AzureDeviceClient is not established",
-                    ExceptionStatusType.RETRY_MAY_FIX_ISSUE  // ✅ RETRY_POSSIBLE i stedet!
-            );
         }
     }
 

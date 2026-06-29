@@ -5,6 +5,7 @@ import com.microsoft.azure.sdk.iot.device.Message;
 import com.microsoft.azure.sdk.iot.device.MessageSentCallback;
 import com.microsoft.azure.sdk.iot.device.exceptions.IotHubClientException;
 import no.cantara.realestate.ExceptionStatusType;
+import no.cantara.realestate.MqttUnavailableException;
 import no.cantara.realestate.azure.iot.AzureDeviceClient;
 import no.cantara.realestate.azure.iot.AzureIotHubConnectionUnstableException;
 import no.cantara.realestate.azure.iot.MqttSendFailureType;
@@ -45,13 +46,14 @@ class AzureObservationDistributionClientUnstableLinkTest {
         when(azureDeviceClient.getConnectionStatusReason()).thenReturn(NO_NETWORK);
         when(azureDeviceClient.getConnectionRetryingForMillis()).thenReturn(5_000L);
 
-        AzureIotHubConnectionUnstableException thrown = assertThrows(AzureIotHubConnectionUnstableException.class,
+        MqttUnavailableException thrown = assertThrows(MqttUnavailableException.class,
                 () -> distributionClient.publish(buildStubObservation()));
 
         // Typed alarm carries the raw SDK signal for the administrator.
-        assertEquals(DISCONNECTED_RETRYING, thrown.getConnectionStatus());
-        assertEquals(NO_NETWORK, thrown.getReason());
-        assertEquals(ExceptionStatusType.connection_error, thrown.getStatusType());
+        AzureIotHubConnectionUnstableException cause = (AzureIotHubConnectionUnstableException) thrown.getCause();
+        assertEquals(DISCONNECTED_RETRYING, cause.getConnectionStatus());
+        assertEquals(NO_NETWORK, cause.getReason());
+        assertEquals(ExceptionStatusType.RETRY_NOT_POSSIBLE, thrown.getStatusType());
         // Sending is stopped: the message never reaches the SDK and is counted as rejected.
         verify(azureDeviceClient, never()).sendEventAsync(any(), any());
         assertEquals(1, distributionClient.getNumberOfMessagesRejected());
