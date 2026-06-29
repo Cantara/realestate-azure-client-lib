@@ -129,19 +129,15 @@ public class AzureObservationDistributionClient implements ObservationDistributi
 
     }
 
-    /**
-     * Helper method to re-establish stable connection to Azure IoT
-     */
-    public void pingAzureIotConnection() throws RealEstateException {
-        //FIXME
-    }
 
     /**
      * @param observationMessage the observation to publish
      * @throws RealEstateException if the connection is not established/stable, or the message cannot be built
+     * @throws AzureIotHubConnectionUnstableException if the connection is not established or unstable. Dayly Quota limit reached may also be the cause.
+     * The client should call close on the AzureObservationDistributionClient when receiving this Exception. Then restart the client to re-establish connection to Azure IoT Hub.
      */
     @Override
-    public void publish(ObservationMessage observationMessage) throws RealEstateException {
+    public void publish(ObservationMessage observationMessage) throws RealEstateException, AzureIotHubConnectionUnstableException {
         // Throw a typed exception if the connection is not established, nor stable (#1805).
         verifyStableConnection();
 
@@ -196,7 +192,12 @@ public class AzureObservationDistributionClient implements ObservationDistributi
 
     }
 
-    private void verifyStableConnection() {
+    /**
+     *
+     * @throws RealEstateException if Connection to AzureDeviceClient is not established
+     * @throws AzureIotHubConnectionUnstableException if the connection is not established or unstable
+     */
+    protected void verifyStableConnection() throws RealEstateException {
         if (!isConnectionEstablished()) {
             // Distinguish a genuinely unstable link (network down or quota exhausted) from a
             // not-yet-opened / cleanly-closed client. On instability we stop sending and raise a
@@ -502,14 +503,15 @@ public class AzureObservationDistributionClient implements ObservationDistributi
 
     /**
      * Reject a new send because the MQTT link is unstable (#1805): count the rejection and build the
-     * typed {@link IotHubConnectionUnstableException} the caller throws, so an administrator can be
+     * typed {@link AzureIotHubConnectionUnstableException} the caller throws, so an administrator can be
      * alerted that the network is down or the device quota is exhausted. The message is not buffered
      * — firing it into a dead connection only feeds the reconnect loop we are trying to break.
+     * @throws AzureIotHubConnectionUnstableException Reject a new send because the MQTT link is unstable
      */
-    private IotHubConnectionUnstableException rejectBecauseConnectionUnstable() {
+    private AzureIotHubConnectionUnstableException rejectBecauseConnectionUnstable() throws AzureIotHubConnectionUnstableException {
         addMessagesRejected();
         telemetryClient.trackEvent("error-publish-observationmessage-connection-unstable");
-        IotHubConnectionUnstableException exception = new IotHubConnectionUnstableException(
+        AzureIotHubConnectionUnstableException exception = new AzureIotHubConnectionUnstableException(
                 azureDeviceClient.getConnectionStatus(),
                 azureDeviceClient.getConnectionStatusReason(),
                 azureDeviceClient.getConnectionRetryingForMillis());
@@ -519,12 +521,16 @@ public class AzureObservationDistributionClient implements ObservationDistributi
 
     /**
      * Record a successful send: reset the back-off (#440), close the circuit if it was open (#441),
-     * and restore the bounded retry policy if it had been switched to NoRetry on quota exhaustion.
+     * restore the bounded retry policy if it had been switched to NoRetry on quota exhaustion, and
+     * tell the device client the link is alive so any retry-budget timer is cleared (#1805).
      */
     private void registerSuccess() {
         sendThrottle.recordOutcome(MqttSendFailureType.NONE);
         boolean wasOpen = circuitBreaker.isOpen();
         circuitBreaker.recordOutcome(MqttSendFailureType.NONE, 0);
+        if (azureDeviceClient != null) {
+            azureDeviceClient.notifyMessageDelivered();
+        }
         if (wasOpen && !circuitBreaker.isOpen() && azureDeviceClient != null) {
             azureDeviceClient.useDefaultRetryPolicy();
         }
@@ -553,7 +559,7 @@ public class AzureObservationDistributionClient implements ObservationDistributi
      *     <li>the send circuit is open because IoT Hub is overloaded (#441 — {@code QUOTA_EXCEEDED}
      *     or persistent {@code THROTTLED}); or</li>
      *     <li>the MQTT link is unstable / force-closed to break a reconnect loop (#1805), in which
-     *     case {@code publish} throws {@link IotHubConnectionUnstableException}.</li>
+     *     case {@code publish} throws {@link AzureIotHubConnectionUnstableException}.</li>
      * </ul>
      * Exposed as a single predicate so external callers do not have to know which source stopped
      * sending — the intent is that "someone" can poll this and, when {@code true}, ping/reopen the

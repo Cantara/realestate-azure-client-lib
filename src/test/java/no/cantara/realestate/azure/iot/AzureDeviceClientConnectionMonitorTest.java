@@ -3,9 +3,12 @@ package no.cantara.realestate.azure.iot;
 import com.microsoft.azure.sdk.iot.device.DeviceClient;
 import org.junit.jupiter.api.Test;
 
+import java.util.concurrent.atomic.AtomicLong;
+
 import static com.microsoft.azure.sdk.iot.device.IotHubConnectionStatusChangeReason.*;
 import static com.microsoft.azure.sdk.iot.device.transport.IotHubConnectionStatus.*;
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.*;
 
 class AzureDeviceClientConnectionMonitorTest {
@@ -48,17 +51,40 @@ class AzureDeviceClientConnectionMonitorTest {
     }
 
     @Test
-    void stuckRetryingPastBudgetIsForceClosedByTheWatchdog() {
+    void repeatedRetryingPastBudgetForcesClose() {
         DeviceClient deviceClient = mock(DeviceClient.class);
-        // Short retry budget so the watchdog poll reaches it quickly; the SDK never sends a second
-        // status callback, so only the timer can trigger the close.
-        AzureDeviceClient client = new AzureDeviceClient(deviceClient, new IotHubConnectionMonitor(200L));
+        AtomicLong clock = new AtomicLong(1_000L);
+        // 60s budget with a controllable clock; the SDK re-fires DISCONNECTED_RETRYING on each attempt.
+        AzureDeviceClient client = new AzureDeviceClient(deviceClient, new IotHubConnectionMonitor(60_000L, clock::get));
 
-        client.handleConnectionStatusChange(DISCONNECTED_RETRYING, NO_NETWORK, new RuntimeException("stuck"));
+        // First retry: the budget clock starts, nothing closes yet.
+        client.handleConnectionStatusChange(DISCONNECTED_RETRYING, NO_NETWORK, new RuntimeException("blip"));
+        verify(deviceClient, after(200).never()).close();
 
-        // No further status change arrives — the watchdog must still force the close once the budget elapses.
-        verify(deviceClient, timeout(3000)).close();
+        // Time passes beyond the budget; the next retry callback re-evaluates and breaks the loop.
+        clock.addAndGet(60_000L);
+        client.handleConnectionStatusChange(DISCONNECTED_RETRYING, NO_NETWORK, new RuntimeException("still stuck"));
+
+        // close() runs on a separate daemon thread; await it.
+        verify(deviceClient, timeout(2000)).close();
         assertTrue(client.isConnectionUnstable());
+    }
+
+    @Test
+    void successfulSendResetsTheRetryBudget() {
+        DeviceClient deviceClient = mock(DeviceClient.class);
+        AtomicLong clock = new AtomicLong(1_000L);
+        AzureDeviceClient client = new AzureDeviceClient(deviceClient, new IotHubConnectionMonitor(60_000L, clock::get));
+
+        client.handleConnectionStatusChange(DISCONNECTED_RETRYING, NO_NETWORK, new RuntimeException("blip"));
+        clock.addAndGet(50_000L);
+        // A message got through — the link is alive, so the budget restarts from here.
+        client.notifyMessageDelivered();
+
+        // Another retry arrives; only 20s have elapsed since the reset, so no close yet.
+        clock.addAndGet(20_000L);
+        client.handleConnectionStatusChange(DISCONNECTED_RETRYING, NO_NETWORK, new RuntimeException("again"));
+        verify(deviceClient, after(200).never()).close();
     }
 
     @Test

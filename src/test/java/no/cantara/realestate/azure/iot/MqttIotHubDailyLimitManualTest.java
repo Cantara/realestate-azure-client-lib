@@ -37,8 +37,8 @@ class MqttIotHubDailyLimitManualTest {
 
     public static void main(String[] args) throws InterruptedException, JsonProcessingException {
         boolean useConfig = true;
-        boolean runInBatch = true;
-        int cleanupPeriodSec = 240;
+        boolean runInBatch = false;
+        int cleanupPeriodSec = 360;//240;
         LoggerContext context = (LoggerContext) LoggerFactory.getILoggerFactory();
         context.getLogger("no.cantara").setLevel(Level.INFO);
         context.getLogger("no.cantara.realestate.azure.iot.MqttIotHubDailyLimitManualTest").setLevel(Level.TRACE);
@@ -79,7 +79,7 @@ class MqttIotHubDailyLimitManualTest {
                     distributionClient.publish(observationMessage);
                     Thread.sleep(100);
                     assertFalse(true, "Should have thrown Exception");
-                } catch (IotHubConnectionUnstableException e) {
+                } catch (AzureIotHubConnectionUnstableException e) {
                     log.info("Expected exception: {}", e.getMessage());
                 }
             }
@@ -99,6 +99,7 @@ class MqttIotHubDailyLimitManualTest {
         log.info("Waiting for replies for {} seconds.", cleanupPeriodSec);
         Thread.sleep(cleanupPeriodSec * 1000);
         log.info("Published a total of: {}", distributionClient.getNumberOfMessagesPublished());
+        log.warn("Will terminate the connection after an elapsed waitingperiod of {} seconds.", cleanupPeriodSec);
         distributionClient.closeConnection();
         assertFalse(distributionClient.isConnectionEstablished());
         assertFalse(distributionClient.isHealthy(), "The client should have reported unhealthy.");

@@ -6,11 +6,6 @@ import com.microsoft.azure.sdk.iot.device.transport.ExponentialBackoffWithJitter
 import com.microsoft.azure.sdk.iot.device.transport.IotHubConnectionStatus;
 import com.microsoft.azure.sdk.iot.device.transport.NoRetry;
 import com.microsoft.azure.sdk.iot.device.transport.RetryPolicy;
-
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanKind;
@@ -18,6 +13,8 @@ import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.semconv.trace.attributes.SemanticAttributes;
 import org.slf4j.Logger;
+
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static no.cantara.realestate.azure.metrics.MetricsConfig.INSTRUMENTATION_SCOPE_NAME;
 import static org.slf4j.LoggerFactory.getLogger;
@@ -40,10 +37,6 @@ public class AzureDeviceClient {
     // Tracks the real MQTT link state from the SDK's connection-status callback and decides when a
     // silent reconnect loop must be broken by force-closing the client (azure-iot-sdk-java#1805).
     private final IotHubConnectionMonitor connectionMonitor;
-    // Re-evaluates the force-close decision on a timer. The SDK fires the status callback only once
-    // when it enters DISCONNECTED_RETRYING and then retries silently — so the retry-budget trigger
-    // would never be re-checked from the callback alone. This poller is what makes it fire.
-    private final ScheduledExecutorService instabilityWatchdog;
     // Guards the force-close so it runs at most once per instability episode.
     private final AtomicBoolean closing = new AtomicBoolean(false);
 
@@ -60,7 +53,6 @@ public class AzureDeviceClient {
         this.connectionMonitor = new IotHubConnectionMonitor();
         applyBoundedRetryPolicy();
         registerConnectionStatusCallback();
-        this.instabilityWatchdog = startInstabilityWatchdog();
         tracer = GlobalOpenTelemetry.getTracer(INSTRUMENTATION_SCOPE_NAME);
     }
 
@@ -82,31 +74,15 @@ public class AzureDeviceClient {
         this.connectionMonitor = connectionMonitor;
         applyBoundedRetryPolicy();
         registerConnectionStatusCallback();
-        this.instabilityWatchdog = startInstabilityWatchdog();
         tracer = GlobalOpenTelemetry.getTracer(INSTRUMENTATION_SCOPE_NAME);
     }
 
     /**
-     * Start the timer that re-evaluates the force-close decision while the link is stuck retrying.
-     * Polls at a quarter of the retry budget (the SDK won't re-notify us during a silent reconnect
-     * loop, so we have to check the clock ourselves). The thread is a daemon and a no-op whenever the
-     * link is healthy.
-     */
-    private ScheduledExecutorService startInstabilityWatchdog() {
-        long pollMillis = Math.max(50L, connectionMonitor.getMaxRetryingMillis() / 4);
-        ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor(runnable -> {
-            Thread thread = new Thread(runnable, "iothub-instability-watchdog");
-            thread.setDaemon(true);
-            return thread;
-        });
-        executor.scheduleWithFixedDelay(this::evaluateForceClose, pollMillis, pollMillis, TimeUnit.MILLISECONDS);
-        return executor;
-    }
-
-    /**
-     * Re-check whether the reconnect loop should be broken, and force-close if so. Called both from
-     * the status callback (immediate, for {@code RETRY_EXPIRED}) and periodically from the watchdog
-     * (for the retry-budget case the callback never re-evaluates). Package-private for testing.
+     * Re-check whether the reconnect loop should be broken, and force-close if so. Driven entirely by
+     * the SDK's connection-status callback: the SDK re-fires {@code DISCONNECTED_RETRYING} on each
+     * reconnect attempt, and the monitor measures elapsed time from the first one — so by the time a
+     * later attempt arrives past the retry budget, this closes the client. {@code RETRY_EXPIRED}
+     * (the SDK giving up) triggers it immediately. Package-private for testing.
      */
     void evaluateForceClose() {
         try {
@@ -114,7 +90,7 @@ public class AzureDeviceClient {
                 forceCloseDueToInstability();
             }
         } catch (Exception e) {
-            log.error("IoT Hub instability watchdog evaluation failed", e);
+            log.error("IoT Hub force-close evaluation failed", e);
         }
     }
 
@@ -156,8 +132,9 @@ public class AzureDeviceClient {
                         newCause == null ? "none" : newCause.toString());
             }
         }
-        // Immediate path: RETRY_EXPIRED (SDK gave up) is a status transition, so it fires here. The
-        // retry-budget case has no further transition and is caught by the watchdog poll instead.
+        // Re-evaluate on every status change. RETRY_EXPIRED closes immediately; for a persistent
+        // DISCONNECTED_RETRYING the SDK re-fires this callback on each reconnect attempt, and the
+        // monitor closes once the elapsed time from the first attempt passes the retry budget.
         evaluateForceClose();
     }
 
@@ -316,6 +293,15 @@ public class AzureDeviceClient {
     /** @return how long the link has been retrying to reconnect, in ms, or {@code 0} if not retrying. */
     public long getConnectionRetryingForMillis() {
         return connectionMonitor.getRetryingForMillis();
+    }
+
+    /**
+     * Notify the monitor that a message was delivered successfully. Proves the link is alive, so it
+     * clears the retry clock — the same effect as a {@code CONNECTED} event — and prevents a stale
+     * retrying window from accumulating toward a force-close.
+     */
+    public void notifyMessageDelivered() {
+        connectionMonitor.recordSuccessfulSend();
     }
 
     public static void main(String[] args) {

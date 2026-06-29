@@ -25,21 +25,21 @@ import no.cantara.realestate.RealEstateException;
  * <pre>{@code
  * try {
  *     distributionClient.publish(observation);
- * } catch (IotHubConnectionUnstableException e) {
+ * } catch (AzureIotHubConnectionUnstableException e) {
  *     alerting.raise("IoT Hub link unstable: " + e.getMessage(),
  *                    e.getConnectionStatus(), e.getReason());
  * }
  * }</pre>
  */
-public class IotHubConnectionUnstableException extends RealEstateException {
+public class AzureIotHubConnectionUnstableException extends RealEstateException {
 
     private final IotHubConnectionStatus connectionStatus;
     private final IotHubConnectionStatusChangeReason reason;
     private final long retryingForMillis;
 
-    public IotHubConnectionUnstableException(IotHubConnectionStatus connectionStatus,
-                                             IotHubConnectionStatusChangeReason reason,
-                                             long retryingForMillis) {
+    public AzureIotHubConnectionUnstableException(IotHubConnectionStatus connectionStatus,
+                                                  IotHubConnectionStatusChangeReason reason,
+                                                  long retryingForMillis) {
         super(buildMessage(connectionStatus, reason, retryingForMillis), ExceptionStatusType.connection_error);
         this.connectionStatus = connectionStatus;
         this.reason = reason;

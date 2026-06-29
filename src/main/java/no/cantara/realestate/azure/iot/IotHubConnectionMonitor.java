@@ -132,6 +132,18 @@ public class IotHubConnectionMonitor {
     }
 
     /**
+     * Record observed link activity — a successfully delivered message. Like a {@code CONNECTED}
+     * event, this proves the link is alive, so the retry clock is cleared and the accumulated
+     * retrying time no longer counts toward a force-close. Has no effect once the client has been
+     * force-closed (no sends can succeed then).
+     */
+    public synchronized void recordSuccessfulSend() {
+        if (!closedDueToInstability) {
+            retryingSinceMillis = 0L;
+        }
+    }
+
+    /**
      * Mark that the client has been (or is being) force-closed because of link instability. Keeps
      * {@link #shouldForceClose()} from firing again and keeps the link reported as not-healthy until
      * a successful reconnect produces a {@code CONNECTED} event.

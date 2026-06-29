@@ -6,7 +6,7 @@ import com.microsoft.azure.sdk.iot.device.MessageSentCallback;
 import com.microsoft.azure.sdk.iot.device.exceptions.IotHubClientException;
 import no.cantara.realestate.ExceptionStatusType;
 import no.cantara.realestate.azure.iot.AzureDeviceClient;
-import no.cantara.realestate.azure.iot.IotHubConnectionUnstableException;
+import no.cantara.realestate.azure.iot.AzureIotHubConnectionUnstableException;
 import no.cantara.realestate.azure.iot.MqttSendFailureType;
 import no.cantara.realestate.observations.ObservationMessage;
 import org.junit.jupiter.api.BeforeEach;
@@ -23,7 +23,7 @@ import static org.mockito.Mockito.*;
 /**
  * The "strup ny sending"/alarm behaviour: when the Azure IoT Hub link is unstable (network down or
  * quota exhausted — indistinguishable from the client side, azure-iot-sdk-java#1805), {@code publish}
- * stops sending and raises a typed {@link IotHubConnectionUnstableException}, and the client reports
+ * stops sending and raises a typed {@link AzureIotHubConnectionUnstableException}, and the client reports
  * unhealthy so a reopen-watchdog can act.
  */
 class AzureObservationDistributionClientUnstableLinkTest {
@@ -45,7 +45,7 @@ class AzureObservationDistributionClientUnstableLinkTest {
         when(azureDeviceClient.getConnectionStatusReason()).thenReturn(NO_NETWORK);
         when(azureDeviceClient.getConnectionRetryingForMillis()).thenReturn(5_000L);
 
-        IotHubConnectionUnstableException thrown = assertThrows(IotHubConnectionUnstableException.class,
+        AzureIotHubConnectionUnstableException thrown = assertThrows(AzureIotHubConnectionUnstableException.class,
                 () -> distributionClient.publish(buildStubObservation()));
 
         // Typed alarm carries the raw SDK signal for the administrator.
@@ -78,7 +78,7 @@ class AzureObservationDistributionClientUnstableLinkTest {
         no.cantara.realestate.RealEstateException thrown = assertThrows(no.cantara.realestate.RealEstateException.class,
                 () -> distributionClient.publish(buildStubObservation()));
 
-        assertFalse(thrown instanceof IotHubConnectionUnstableException);
+        assertFalse(thrown instanceof AzureIotHubConnectionUnstableException);
         assertEquals(ExceptionStatusType.RETRY_MAY_FIX_ISSUE, thrown.getStatusType());
     }
 
