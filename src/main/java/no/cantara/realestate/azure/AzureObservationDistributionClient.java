@@ -35,6 +35,7 @@ import static org.slf4j.LoggerFactory.getLogger;
 @AutoService(ObservationDistributionClient.class)
 public class AzureObservationDistributionClient implements ObservationDistributionClient, DistributionService {
     private static final Logger log = getLogger(AzureObservationDistributionClient.class);
+    private boolean isHealthy;
     private static final int DEFAULT_MAX_SIZE = 1000;
     public static final int MAX_CONSECUTIVE_CLIENT_DISCONNECT_ERRORS = 20;
     public static final String CONNECTIONSTRING_KEY = "distribution.azure.connectionString";
@@ -65,6 +66,8 @@ public class AzureObservationDistributionClient implements ObservationDistributi
     private final Tracer tracer;
     private final TelemetryClient telemetryClient;
     private Instant whenLastMessageDistributedAt = null;
+
+    private String lastUnhealthyCause = null;
 
     /*
     Intended used for testing.
@@ -162,16 +165,18 @@ public class AzureObservationDistributionClient implements ObservationDistributi
                 public void onMessageSent(Message sentMessage, IotHubClientException iotHubClientException, Object callbackContext) {
                     try {
                         if (iotHubClientException != null) {
-                            log.trace("Received Error when sening message to to Azure IoT Hub: {}, Exception: {}", sentMessage, iotHubClientException);
+                            log.trace("Received Error when sending message to to Azure IoT Hub: {}, Exception: {}", sentMessage, iotHubClientException);
                             MqttSendFailureType failureType = registerFailure(iotHubClientException, observationMessage);
                             telemetryClient.trackEvent("publish-failed-" + failureType.name());
                             span.setStatus(StatusCode.ERROR, iotHubClientException.getMessage());
                             span.recordException(iotHubClientException);
+                            setUnhealthy("publish-failed--%s--%s".formatted(messageId, iotHubClientException.getMessage()));
                         } else {
                             log.trace("Message is sent to Azure IoT Hub: {}", sentMessage);
                             addMessagesPublished();
                             registerSuccess();
                             span.setStatus(StatusCode.OK);
+                            setHealthy();
                         }
                         messageSent(sentMessage);
                     } finally {
@@ -226,6 +231,16 @@ public class AzureObservationDistributionClient implements ObservationDistributi
         return true;
     }
 
+    protected void setUnhealthy(String message) {
+        this.lastFailureAt = Instant.now();
+        this.lastUnhealthyCause = message;
+        this.isHealthy = false;
+    }
+
+    protected void setHealthy() {
+        this.isHealthy = true;
+    }
+
     /**
      * Reflects whether sending is operational. Returns {@code false} when either:
      * <ul>
@@ -244,14 +259,14 @@ public class AzureObservationDistributionClient implements ObservationDistributi
     public boolean isHealthy() {
         boolean isConnectionOpen = !circuitBreaker.isOpen();
         int connectionFailures = sendThrottle.getConsecutiveTransientFailures();
-        boolean connectionErrorsBelowTreshold = connectionFailures <= MAX_CONSECUTIVE_CLIENT_DISCONNECT_ERRORS;
+        //TODOboolean connectionErrorsBelowTreshold = connectionFailures <= MAX_CONSECUTIVE_CLIENT_DISCONNECT_ERRORS;
         // The MQTT link being unstable — or force-closed to break a reconnect loop (#1805) — reports
         // unhealthy. This is the signal a reopen-watchdog acts on to bring the connection back.
         boolean linkStable = azureDeviceClient == null || !azureDeviceClient.isConnectionUnstable();
-        boolean isHealthy = isConnectionOpen && connectionErrorsBelowTreshold && linkStable;
-        log.trace("isHealthy: {}. Based on isConectionOpen {}, connectionFailures/maxAlowed {}/{}, linkStable {} ",
-                isHealthy, isConnectionOpen, connectionFailures, MAX_CONSECUTIVE_CLIENT_DISCONNECT_ERRORS, linkStable);
-        return isHealthy;
+        boolean reportHealth = isHealthy && isConnectionOpen && linkStable; //TODO && connectionErrorsBelowTreshold;
+//        log.trace("isHealthy: {}. IsHealthyStatus: {}, isConectionOpen {}, connectionFailures/maxAlowed {}/{}, linkStable {} ",
+//                reportHealth, isHealthy, isConnectionOpen, connectionFailures, MAX_CONSECUTIVE_CLIENT_DISCONNECT_ERRORS, linkStable);
+        return reportHealth;
     }
 
     @Override

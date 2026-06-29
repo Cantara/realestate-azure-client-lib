@@ -28,6 +28,7 @@ class AzureObservationDistributionClientCircuitTest {
         azureDeviceClient = mock(AzureDeviceClient.class);
         when(azureDeviceClient.isConnectionEstablished()).thenReturn(true);
         distributionClient = new AzureObservationDistributionClient(azureDeviceClient);
+        distributionClient.setHealthy();
     }
 
     @Test
