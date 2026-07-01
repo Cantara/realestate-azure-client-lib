@@ -88,6 +88,18 @@ class AzureDeviceClientConnectionMonitorTest {
     }
 
     @Test
+    void expiredSasTokenIsSelfHealing_doesNotForceCloseOrStop() {
+        DeviceClient deviceClient = mock(DeviceClient.class);
+        AzureDeviceClient client = new AzureDeviceClient(deviceClient);
+
+        // Routine SAS-token renewal — the SDK reconnects with a fresh token on its own.
+        client.handleConnectionStatusChange(DISCONNECTED_RETRYING, EXPIRED_SAS_TOKEN, new RuntimeException("token expired"));
+
+        assertFalse(client.isConnectionUnstable(), "token renewal must not stop sending");
+        verify(deviceClient, after(300).never()).close();
+    }
+
+    @Test
     void cleanCloseIsNotReportedAsUnstable() {
         AzureDeviceClient client = new AzureDeviceClient(mock(DeviceClient.class));
 

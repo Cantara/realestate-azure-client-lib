@@ -116,6 +116,11 @@ public class IotHubConnectionMonitor {
         if (closedDueToInstability) {
             return false;
         }
+        if (isSelfHealingReason(reason)) {
+            // Routine SAS-token renewal: the SDK reconnects and mints a fresh token on its own, so
+            // do not force-close — that would break its recovery and require us to reopen.
+            return false;
+        }
         if (status == IotHubConnectionStatus.DISCONNECTED
                 && reason == IotHubConnectionStatusChangeReason.RETRY_EXPIRED) {
             return true;
@@ -158,6 +163,11 @@ public class IotHubConnectionMonitor {
      * deliberate {@code CLIENT_CLOSE} are <em>not</em> reported as unstable.
      */
     public synchronized boolean isLinkUnstable() {
+        if (isSelfHealingReason(reason)) {
+            // Routine SAS-token renewal (MQTT renews by dropping/reconnecting, not in place). The SDK
+            // recovers on its own with a fresh token, so this is not an outage — do not stop sending.
+            return false;
+        }
         if (status == IotHubConnectionStatus.DISCONNECTED_RETRYING) {
             return true;
         }
@@ -167,6 +177,16 @@ public class IotHubConnectionMonitor {
                     && reason != IotHubConnectionStatusChangeReason.CONNECTION_OK;
         }
         return false;
+    }
+
+    /**
+     * @return {@code true} for disconnect reasons the SDK recovers from on its own, so the monitor
+     * must not treat them as an outage. Today this is only {@code EXPIRED_SAS_TOKEN}: on MQTT the SDK
+     * renews the SAS token by reconnecting (a routine ~hourly event for a connection-string client),
+     * and retrying it — unlike a quota overload — does no harm.
+     */
+    private static boolean isSelfHealingReason(IotHubConnectionStatusChangeReason reason) {
+        return reason == IotHubConnectionStatusChangeReason.EXPIRED_SAS_TOKEN;
     }
 
     /**
