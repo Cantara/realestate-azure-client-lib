@@ -37,7 +37,7 @@ class MqttIotHubDailyLimitManualTest {
 
     public static void main(String[] args) throws InterruptedException, JsonProcessingException {
         boolean useConfig = true;
-        boolean runInBatch = false;
+        boolean runInBatch = true;
         int cleanupPeriodSec = 360;//240;
         LoggerContext context = (LoggerContext) LoggerFactory.getILoggerFactory();
         context.getLogger("no.cantara").setLevel(Level.INFO);
@@ -54,7 +54,7 @@ class MqttIotHubDailyLimitManualTest {
         try {
             if (runInBatch) {
                 int iter = 1;
-                int max = 10;
+                int max = 5;//400;
                 do {
                     log.info("Next iteration {} of {}", iter, max);
                     for (int i = 0; i < BATCH_SIZE; i++) {

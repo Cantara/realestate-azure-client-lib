@@ -90,6 +90,26 @@ class IotHubConnectionMonitorTest {
     }
 
     @Test
+    void expiredSasTokenWhileRetryingIsSelfHealing_notUnstableNoForceClose() {
+        // MQTT renews the SAS token by dropping/reconnecting; the SDK recovers on its own with a
+        // fresh token, so this must NOT be treated as an outage that stops sending or force-closes.
+        monitor.recordStatusChange(DISCONNECTED_RETRYING, EXPIRED_SAS_TOKEN, new RuntimeException("token expired"));
+
+        assertFalse(monitor.isLinkUnstable());
+        assertFalse(monitor.isConnectionUnstableOrStopped());
+        // Even well past the retry budget the token renewal must not force a close.
+        clock.addAndGet(300_000L);
+        assertFalse(monitor.shouldForceClose());
+    }
+
+    @Test
+    void expiredSasTokenWhileDisconnectedIsSelfHealing() {
+        monitor.recordStatusChange(DISCONNECTED, EXPIRED_SAS_TOKEN, new RuntimeException("token expired"));
+        assertFalse(monitor.isLinkUnstable());
+        assertFalse(monitor.shouldForceClose());
+    }
+
+    @Test
     void retryClockResetsAfterReconnect() {
         monitor.recordStatusChange(DISCONNECTED_RETRYING, NO_NETWORK, null);
         clock.addAndGet(120_000L);
